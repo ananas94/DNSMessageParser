@@ -22,10 +22,11 @@
 #include <unordered_map>
 #include <cstdint>
 
+const size_t UDP_SIZE_LIMIT=512;
 
 struct header_t{
 	uint16_t ID;
-	uint16_t QR:1,Opcode:4,AA:1,TC:1,RD:1,RA:1,Z:1,RCODE:4;
+	uint16_t QR:1,Opcode:4,AA:1,TC:1,RD:1,RA:1,Z:1,RCODE:4; //not a real thing. could be usefull if we stuck to platform, compiller and sure about paddings 
 	uint16_t QDCOUNT;
 	uint16_t ANCOUNT;
 	uint16_t NSCOUNT;
@@ -56,47 +57,154 @@ struct dns_message{
 };	
 
 
-int8_t char_to_4bit(char c)
+//could be linux/windows function, but platform is unspecified, so make own implementations
+uint16_t
+ntohs(uint16_t net)
 {
-	if (c >= '0' && c<='9')
-		return c - '0';
-	else if (c >='a' && c<='f')
-		return c - 'a'+10;
-	else if (c >='A' && c<='F')
-		return c - 'A'+10;
-	else
-	{
-		std::string errMsg;
-		errMsg += c;
-		errMsg += " not a hex";
-		throw std::invalid_argument(errMsg);
-		//throw std::invalid_argument(std::format("{} is not hex",c));
-	}
+	uint16_t ret = (net & 0xff) << 8 | (net & 0xff00) >> 8;
+	return ret;
+
+}
+uint32_t
+ntohl(uint32_t net)
+{
+	uint32_t ret = (net & 0xff000000) >> 24 | (net & 0xff0000) >> 8 | (net & 0xff00) << 8 | (net & 0xff) <<24;
+	return ret;
 }
 
-std::vector<uint8_t> hex_to_raw(const std::string &in)
+header_t 
+parse_header(const uint8_t *data, const size_t size)
 {
-	size_t in_size = in.size();
-	if ( in_size % 4 != 0 ) throw std::invalid_argument("not a hex");
-		//throw std::invalid_argument( std::format("{} is not hex string", in));
-	std::vector<uint8_t> ret( in_size / 4 );
-	for (size_t i=0; i < in_size; i+=4)
+	header_t ret;
+	if (size < sizeof(uint16_t) * 6)
 	{
-		uint8_t b = (char_to_4bit( in[i +2]) << 4) + char_to_4bit( in[i+3]);
-		ret[i / 4] = b;
+		std::string errMsg("could not parse dns header");
+		throw std::invalid_argument(errMsg);
+
+	}
+	std::memcpy(&ret.ID, data, sizeof(ret.ID));
+	ret.ID = ntohs(ret.ID);
+	size_t offset = sizeof(ret.ID);
+
+	uint16_t flags;
+	std::memcpy(&flags, data + offset , sizeof(flags));
+	flags = ntohs(flags);
+
+	ret.RCODE = flags & 0xF;
+	ret.Z = (flags >> 4) & 0x111;
+	ret.RA = (flags >> 7) & 0x1;
+	ret.RD = (flags >> 8) & 0x1;
+	ret.TC = (flags >> 9) & 0x1;
+	ret.AA = (flags >> 10) & 0x1;
+	ret.Opcode = (flags >> 11) & 0xF;
+	ret.QR = flags >> 15;
+
+	offset += sizeof(flags);
+
+	std::memcpy(&ret.QDCOUNT, data + offset, sizeof(ret.QDCOUNT));
+	ret.QDCOUNT = ntohs(ret.QDCOUNT);
+	offset += sizeof(ret.QDCOUNT);
+
+	std::memcpy(&ret.ANCOUNT, data + offset, sizeof(ret.ANCOUNT));
+	ret.ANCOUNT = ntohs(ret.ANCOUNT);
+	offset += sizeof(ret.ANCOUNT);
+
+	std::memcpy(&ret.NSCOUNT, data + offset, sizeof(ret.NSCOUNT));
+	ret.NSCOUNT = ntohs(ret.NSCOUNT);
+	offset += sizeof(ret.NSCOUNT);
+
+	std::memcpy(&ret.ARCOUNT, data + offset, sizeof(ret.ARCOUNT));
+	ret.ARCOUNT = ntohs(ret.ARCOUNT);
+	offset += sizeof(ret.ARCOUNT);
+
+	return ret;
+}
+
+void print_header(header_t h)
+{
+/*
+;; ->>HEADER<<- opcode: QUERY; status: NOERROR; id: 28028
+;; Flags: qr rd ra; QUERY: 1; ANSWER: 1; AUTHORITY: 0; ADDITIONAL: 0
+*/
+	std::cout << "->>HEADER<<- opcode: " << h.Opcode << "; status: " << h.RCODE << "; id: " <<h.ID << std::endl;
+	std::cout << "flags: qr " << h.QR << "AA: "<< h.AA << " TC " <<h.TC<<" RD "<<h.RD<<" RA " <<h.RA <<" Z " <<h.Z <<std::endl;
+	std::cout << "QUER " <<h.QDCOUNT << " AN "<< h.ANCOUNT <<" NS " << h.NSCOUNT << " AR " << h.ARCOUNT << std::endl;
+};
+
+
+size_t
+append_label(const char* domain, size_t domain_size, const char *buff, const char *size)
+{
+}
+
+question_t
+parse_question(const char * buff, size_t offset, size_t size)
+{	
+	
+}
+
+
+
+
+uint8_t parse_raw(const char *buf)
+{
+	unsigned int uintVal;
+	if (sscanf(buf,"\\x%2x", &uintVal) != 1)
+	{
+		std::string errMsg;
+		errMsg+="\"";
+		errMsg+=buf;
+		errMsg+="\" could not be parsed as hex";
+		throw std::invalid_argument(errMsg);
+	}
+	return uintVal;
+}
+std::vector<uint8_t>  parse_input_string(std::string str)
+{
+
+	size_t strSize = str.size();
+	if (
+		strSize %4 != 2 ||
+		str[0] != '"' || 
+	       	str[strSize-1] != '"'   
+	   )  
+	{
+		std::string errMsg;
+		errMsg+="\"";
+		errMsg+=str;
+		errMsg+="\" is not hex formatted string";
+		throw std::invalid_argument(errMsg);
+	}
+	const char *strCStr = str.c_str();
+	std::vector<uint8_t> ret(strSize/4);
+	for (int i = 0; i<strSize/4; i++)
+	{
+		ret[i] = parse_raw(strCStr + 1 + 4*i);
 	}
 	return ret;
 }
 
 int main() {
     /* Enter your code here. Read input from STDIN. Print output to STDOUT */
-	std::string input;
-	std::cin >> input;
 	try{
-		auto raw_data = hex_to_raw(input);
-		for (auto c : raw_data)
-			std::cout <<(int)c<< " ";
-		std::cout<<std::endl;
+			std::vector<uint8_t> raw_data;
+		while (std::cin.good())
+		{
+			raw_data.reserve(UDP_SIZE_LIMIT);
+			std::string input;
+
+			std::cin >> input;
+
+			if (input.size() == 1 && input[0] == '\\' || input.size()==0 ) continue;
+
+			auto raw_string_data = parse_input_string(input);
+
+			raw_data.insert(raw_data.end(), raw_string_data.begin(), raw_string_data.end());
+		}
+
+		header_t header = parse_header(raw_data.data(),raw_data.size());
+		print_header(header);
+
 	}
 	catch (std::invalid_argument e)
 	{
