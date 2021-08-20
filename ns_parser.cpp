@@ -41,12 +41,12 @@ struct question_t{
 };
 
 struct resource_record_t{
-	char *NAME;
+	std::string NAME;
 	uint16_t TYPE;
 	uint16_t CLASS;
 	uint32_t TTL;
 	uint16_t RDLENGTH;
-	void *RDATA;	
+	const void *RDATA;	
 };
 
 struct dns_message{
@@ -139,12 +139,12 @@ size_t
 append_label(char* domain, size_t& dOffset, size_t dSize, const uint8_t *buff, size_t bOffset, size_t bSize, bool couldBeCompressed=true)
 {
 	if ( bOffset >= bSize ) throw std::invalid_argument("label overflow");
-	uint8_t lSize = buff[bOffset];
+	uint16_t lSize = buff[bOffset];
 	bOffset++;
 	if ( (lSize & 0xc0) == 0xc0 ) 
 	{
 		//compressed label
-		return lSize;
+		return (lSize << 8) | buff[bOffset]; //TODO: looks like hack
 
 	} else
 	{
@@ -170,11 +170,11 @@ parse_name(char* domain,size_t dSize, const uint8_t *buff, size_t bOffset, size_
 	bool   compressed = false;
 	while ( (lSize = append_label(domain, dOffset, dSize, buff, bOffset, bSize, couldBeCompressed)) != 0) 
 	{
-		if ( (lSize & 0xc0) == 0xc0 ) 
+		if ( (lSize & 0xc000) == 0xc000 ) 
 		{
-			nextFiledOffset +=1;
+			nextFiledOffset +=2;
 			compressed = true;
-			bOffset = lSize & 0x3f;
+			bOffset = lSize & 0x3fff;
 		}
 		else
 		{
@@ -182,19 +182,18 @@ parse_name(char* domain,size_t dSize, const uint8_t *buff, size_t bOffset, size_
 			bOffset += lSize + 1;
 		}
 	}
-	std::cout << (nextFiledOffset + (compressed ? 0 : 1) )<<std::endl;
 	return nextFiledOffset + (compressed ? 0 : 1);
 }
 
 question_t
-parse_question(const uint8_t * buff, size_t offset, size_t size)
+parse_question(const uint8_t * buff, size_t offset, size_t size, size_t &qOffset)
 {	
 	question_t ret;
 	char domain[ MAX_NAME_LENGTH + 1];	
 	size_t dOffset = 0;
 	domain[dOffset]=0;
 
-	dOffset = parse_name(domain, sizeof(domain), buff, offset, size);
+	dOffset = parse_name(domain, sizeof(domain), buff, offset, size); //TODO: make it dOffset, not buff offset
 
 	std::memcpy(&ret.QTYPE, buff + dOffset, sizeof(ret.QTYPE));
 	ret.QTYPE = ntohs(ret.QTYPE);
@@ -207,6 +206,7 @@ parse_question(const uint8_t * buff, size_t offset, size_t size)
 
 	ret.QNAME = domain;
 
+	qOffset = dOffset - offset;
 	return ret;
 }
 
@@ -220,6 +220,60 @@ print_question(const question_t &q)
 	std::cout << q.QNAME << "\t\t\t" << q.QCLASS << "\t"<< q.QTYPE <<std::endl;
 }
 
+
+
+resource_record_t
+parse_record(const uint8_t * buff, size_t offset, size_t size, size_t &rOffset)
+{
+	resource_record_t ret;
+	/*
+	std::string NAME;
+	uint16_t TYPE;
+	uint16_t CLASS;
+	uint32_t TTL;
+	uint16_t RDLENGTH;
+	void *RDATA;	
+	*/
+	char domain[ MAX_NAME_LENGTH + 1];	
+	size_t dOffset = 0;
+	domain[dOffset]=0;
+	dOffset = parse_name(domain, sizeof(domain), buff, offset, size); //TODO: see parse_question
+
+	ret.NAME = domain;
+
+	std::memcpy(&ret.TYPE, buff + dOffset, sizeof(ret.TYPE));   //TODO: make function.. probably with pointer to member... probably template for i32
+	ret.TYPE = ntohs(ret.TYPE);
+	dOffset += sizeof(ret.TYPE);
+
+	std::memcpy(&ret.CLASS, buff + dOffset, sizeof(ret.CLASS));
+	ret.CLASS = ntohs(ret.CLASS);
+	dOffset += sizeof(ret.CLASS);
+
+	std::memcpy(&ret.TTL, buff + dOffset, sizeof(ret.TTL));
+	ret.TTL = ntohl(ret.TTL);  // maybe ntoh() not C-like?
+	dOffset += sizeof(ret.TTL);
+
+
+	std::memcpy(&ret.RDLENGTH, buff + dOffset, sizeof(ret.RDLENGTH));
+	ret.RDLENGTH = ntohs(ret.RDLENGTH);
+	dOffset += sizeof(ret.RDLENGTH);
+
+	ret.RDATA = buff + dOffset;
+	dOffset += ret.RDLENGTH;
+
+	return ret;
+};
+
+const char* print_rdata(uint16_t,const void *,uint16_t) { return "";}
+
+void
+print_resourse_record(resource_record_t r)
+{
+	/*
+		example.com.		76391	IN	A	93.184.216.34
+	   */
+	std::cout << r.NAME << "\t\t" << r.TTL << "\t" << r.CLASS << "\t" << r.TYPE << "\t" << print_rdata(r.TYPE, r.RDATA, r.RDLENGTH) << std::endl;
+}
 
 
 
@@ -283,10 +337,28 @@ int main() {
 		}
 
 		header_t header = parse_header(raw_data.data(),raw_data.size());
-		question_t question = parse_question(raw_data.data(), sizeof(int16_t) * 6, raw_data.size());
+		const size_t headerOffset = 6 * sizeof(int16_t);
 		print_header(header);
-		std::cout << ";; QUESTION SECTION:"<<std::endl;
-		print_question(question);
+		size_t qOffset = 0;
+		if (header.QDCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
+		{
+			std::cout << ";; QUESTION SECTION:"<<std::endl;
+			for (int i=0; i< header.QDCOUNT; i++) 
+			{
+				question_t question = parse_question(raw_data.data(), qOffset + headerOffset, raw_data.size(), qOffset);
+				print_question(question);
+			}
+		}
+		size_t resourceRecordOffset = 0;
+		if (header.ANCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
+		{
+			std::cout << ";; ANSWER SECTION:"<<std::endl;
+			for (int i=0; i< header.ANCOUNT; i++) 
+			{
+				resource_record_t record = parse_record(raw_data.data(), qOffset + resourceRecordOffset + headerOffset, raw_data.size(), resourceRecordOffset);
+				print_resourse_record(record);
+			}
+		}
 
 	}
 	catch (std::invalid_argument e)
