@@ -23,10 +23,11 @@
 #include <cstdint>
 
 const size_t UDP_SIZE_LIMIT=512;
+const size_t MAX_NAME_LENGTH=255;
 
 struct header_t{
 	uint16_t ID;
-	uint16_t QR:1,Opcode:4,AA:1,TC:1,RD:1,RA:1,Z:1,RCODE:4; //not a real thing. could be usefull if we stuck to platform, compiller and sure about paddings 
+	uint16_t QR:1,Opcode:4,AA:1,TC:1,RD:1,RA:1,Z:1,RCODE:4; //not a real thing. could be usefull if we stuck to big-endianness, platform, compiller and sure about paddings 
 	uint16_t QDCOUNT;
 	uint16_t ANCOUNT;
 	uint16_t NSCOUNT;
@@ -34,7 +35,7 @@ struct header_t{
 };
 
 struct question_t{
-	char *QNAME;
+	std::string QNAME;
 	uint16_t QTYPE;
 	uint16_t QCLASS;
 };
@@ -58,6 +59,7 @@ struct dns_message{
 
 
 //could be linux/windows function, but platform is unspecified, so make own implementations
+// TODO: add ifdef
 uint16_t
 ntohs(uint16_t net)
 {
@@ -120,6 +122,7 @@ parse_header(const uint8_t *data, const size_t size)
 	return ret;
 }
 
+//TODO: make std::cout do it 
 void print_header(header_t h)
 {
 /*
@@ -131,16 +134,90 @@ void print_header(header_t h)
 	std::cout << "QUER " <<h.QDCOUNT << " AN "<< h.ANCOUNT <<" NS " << h.NSCOUNT << " AR " << h.ARCOUNT << std::endl;
 };
 
+//TODO: reference for dOffset looks ugly 
+size_t
+append_label(char* domain, size_t& dOffset, size_t dSize, const uint8_t *buff, size_t bOffset, size_t bSize, bool couldBeCompressed=true)
+{
+	if ( bOffset >= bSize ) throw std::invalid_argument("label overflow");
+	uint8_t lSize = buff[bOffset];
+	bOffset++;
+	if ( (lSize & 0xc0) == 0xc0 ) 
+	{
+		//compressed label
+		return lSize;
+
+	} else
+	{
+		if ( lSize == 0 ) return lSize;
+		if ( (lSize & 0xc0) != 0 ) throw std::invalid_argument("unknown compression flag");
+		
+		std::memcpy(domain+dOffset, buff+bOffset, lSize);
+		dOffset += lSize;
+		domain[dOffset] = '.'; //FQDN YEAH
+		dOffset++;
+		domain[dOffset]=0;
+		return lSize;
+	}
+}
 
 size_t
-append_label(const char* domain, size_t domain_size, const char *buff, const char *size)
+parse_name(char* domain,size_t dSize, const uint8_t *buff, size_t bOffset, size_t bSize, bool couldBeCompressed=true)
 {
+	size_t dOffset = 0;
+	domain[dOffset]=0;
+	size_t nextFiledOffset = bOffset;
+	size_t lSize;
+	bool   compressed = false;
+	while ( (lSize = append_label(domain, dOffset, dSize, buff, bOffset, bSize, couldBeCompressed)) != 0) 
+	{
+		if ( (lSize & 0xc0) == 0xc0 ) 
+		{
+			nextFiledOffset +=1;
+			compressed = true;
+			bOffset = lSize & 0x3f;
+		}
+		else
+		{
+			if (!compressed) nextFiledOffset += lSize + 1;
+			bOffset += lSize + 1;
+		}
+	}
+	std::cout << (nextFiledOffset + (compressed ? 0 : 1) )<<std::endl;
+	return nextFiledOffset + (compressed ? 0 : 1);
 }
 
 question_t
-parse_question(const char * buff, size_t offset, size_t size)
+parse_question(const uint8_t * buff, size_t offset, size_t size)
 {	
-	
+	question_t ret;
+	char domain[ MAX_NAME_LENGTH + 1];	
+	size_t dOffset = 0;
+	domain[dOffset]=0;
+
+	dOffset = parse_name(domain, sizeof(domain), buff, offset, size);
+
+	std::memcpy(&ret.QTYPE, buff + dOffset, sizeof(ret.QTYPE));
+	ret.QTYPE = ntohs(ret.QTYPE);
+	dOffset += sizeof(ret.QTYPE);
+
+
+	std::memcpy(&ret.QCLASS, buff + dOffset, sizeof(ret.QCLASS));
+	ret.QCLASS = ntohs(ret.QCLASS);
+	dOffset += sizeof(ret.QCLASS);
+
+	ret.QNAME = domain;
+
+	return ret;
+}
+
+void
+print_question(const question_t &q)
+{
+/*
+    ;; QUESTION SECTION:
+    ;; example.com.			IN	A
+*/
+	std::cout << q.QNAME << "\t\t\t" << q.QCLASS << "\t"<< q.QTYPE <<std::endl;
 }
 
 
@@ -159,7 +236,9 @@ uint8_t parse_raw(const char *buf)
 	}
 	return uintVal;
 }
-std::vector<uint8_t>  parse_input_string(std::string str)
+
+std::vector<uint8_t>
+parse_input_string(std::string str)
 {
 
 	size_t strSize = str.size();
@@ -169,12 +248,13 @@ std::vector<uint8_t>  parse_input_string(std::string str)
 	       	str[strSize-1] != '"'   
 	   )  
 	{
-		std::string errMsg;
+		std::string errMsg; //TODO: on c++20 std::format me 
 		errMsg+="\"";
 		errMsg+=str;
 		errMsg+="\" is not hex formatted string";
 		throw std::invalid_argument(errMsg);
 	}
+
 	const char *strCStr = str.c_str();
 	std::vector<uint8_t> ret(strSize/4);
 	for (int i = 0; i<strSize/4; i++)
@@ -187,7 +267,7 @@ std::vector<uint8_t>  parse_input_string(std::string str)
 int main() {
     /* Enter your code here. Read input from STDIN. Print output to STDOUT */
 	try{
-			std::vector<uint8_t> raw_data;
+		std::vector<uint8_t> raw_data;
 		while (std::cin.good())
 		{
 			raw_data.reserve(UDP_SIZE_LIMIT);
@@ -195,7 +275,7 @@ int main() {
 
 			std::cin >> input;
 
-			if (input.size() == 1 && input[0] == '\\' || input.size()==0 ) continue;
+			if (input.size() == 1 && input[0] == '\\' || input.size()==0 ) continue; // copy-paste to terminal from hackerrank add empty lines to input, so ignore 0-sized strings
 
 			auto raw_string_data = parse_input_string(input);
 
@@ -203,7 +283,10 @@ int main() {
 		}
 
 		header_t header = parse_header(raw_data.data(),raw_data.size());
+		question_t question = parse_question(raw_data.data(), sizeof(int16_t) * 6, raw_data.size());
 		print_header(header);
+		std::cout << ";; QUESTION SECTION:"<<std::endl;
+		print_question(question);
 
 	}
 	catch (std::invalid_argument e)
