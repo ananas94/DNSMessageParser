@@ -264,6 +264,8 @@ parse_record(const uint8_t * buff, size_t offset, size_t size, size_t &rOffset)
 	return ret;
 };
 
+// https://www.cloudflare.com/learning/dns/dns-records/
+// I guess, it's enough to implement commonly-used subset and print hex for other things...
 const char* print_rdata(uint16_t,const void *,uint16_t) { return "";}
 
 void
