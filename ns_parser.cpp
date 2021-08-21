@@ -122,17 +122,19 @@ parse_header(const uint8_t *data, const size_t size)
 	return ret;
 }
 
-//TODO: make std::cout do it 
-void print_header(header_t h)
+std::ostream& operator<<(std::ostream& os, header_t h)
 {
+
 /*
 ;; ->>HEADER<<- opcode: QUERY; status: NOERROR; id: 28028
 ;; Flags: qr rd ra; QUERY: 1; ANSWER: 1; AUTHORITY: 0; ADDITIONAL: 0
 */
-	std::cout << "->>HEADER<<- opcode: " << h.Opcode << "; status: " << h.RCODE << "; id: " <<h.ID << std::endl;
-	std::cout << "flags: qr " << h.QR << "AA: "<< h.AA << " TC " <<h.TC<<" RD "<<h.RD<<" RA " <<h.RA <<" Z " <<h.Z <<std::endl;
-	std::cout << "QUER " <<h.QDCOUNT << " AN "<< h.ANCOUNT <<" NS " << h.NSCOUNT << " AR " << h.ARCOUNT << std::endl;
+	os << ";; ->>HEADER<<- opcode: " << h.Opcode << "; status: " << h.RCODE << "; id: " <<h.ID << std::endl;
+	os << ";; Flags: qr " << h.QR << "AA: "<< h.AA << " TC " <<h.TC<<" RD "<<h.RD<<" RA " <<h.RA <<" Z " <<h.Z <<std::endl;
+	os << "QUER " <<h.QDCOUNT << " AN "<< h.ANCOUNT <<" NS " << h.NSCOUNT << " AR " << h.ARCOUNT << std::endl;
+	return os;
 };
+
 
 //TODO: reference for dOffset looks ugly 
 size_t
@@ -210,6 +212,7 @@ parse_question(const uint8_t * buff, size_t offset, size_t size, size_t &qOffset
 	return ret;
 }
 
+//TODO: make std::cout do it 
 void
 print_question(const question_t &q)
 {
@@ -270,6 +273,7 @@ parse_record(const uint8_t * buff, size_t offset, size_t size, size_t &rOffset)
 // wait... where is AAAA record?
 const char* print_rdata(uint16_t,const void *,uint16_t) { return "";}
 
+//TODO: make std::cout do it 
 void
 print_resourse_record(resource_record_t r)
 {
@@ -342,7 +346,7 @@ int main() {
 
 		header_t header = parse_header(raw_data.data(),raw_data.size());
 		const size_t headerOffset = 6 * sizeof(int16_t);
-		print_header(header);
+		std::cout << header;
 		size_t qOffset = 0;
 		if (header.QDCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
 		{
