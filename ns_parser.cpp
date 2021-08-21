@@ -5,9 +5,6 @@
 #include <list>
 #include <cmath>
 #include <ctime>
-#include <deque>
-#include <queue>
-#include <stack>
 #include <string>
 #include <bitset>
 #include <cstdio>
@@ -23,6 +20,8 @@
 #include <algorithm>
 #include <unordered_map>
 #include <cstdint>
+#include <memory>
+#include <iomanip>
 
 const size_t UDP_SIZE_LIMIT=512;
 const size_t MAX_NAME_LENGTH=255;
@@ -77,13 +76,20 @@ struct question_t{
 	uint16_t QCLASS;
 };
 
+class RData;
 struct resource_record_t{
 	std::string NAME;
 	uint16_t TYPE;
 	uint16_t CLASS;
 	uint32_t TTL;
+	//TODO: memory safety unique_ptr and vector?? destructor?
+	RData *RDATA;
+	//std::unique_ptr<RData> RDATA;
+
+	/*
 	uint16_t RDLENGTH;
 	const void *RDATA;	
+	*/
 };
 
 struct dns_message_t{
@@ -93,6 +99,75 @@ struct dns_message_t{
 	std::vector<resource_record_t> Authority;
 	std::vector<resource_record_t> Additional;
 };	
+
+
+
+
+class RData
+{
+	protected:
+		const void* data;
+		const size_t size;
+	public:
+		RData(const void* d, size_t s): data(d), size(s) {};
+		virtual operator std::string()
+		{
+			std::stringstream ss;
+			ss << "unknown rdata(" << this->size <<") hex: [";
+			ss.setf(std::ios_base::hex, std::ios_base::basefield);
+			ss.setf(std::ios_base::showbase);
+			for (size_t i=0; i< size; i++)
+				ss << (int) ((const uint8_t*)data)[i] << " ";
+
+			ss.unsetf(std::ios_base::hex);
+			ss<< "]";
+
+			return ss.str();
+		}
+};
+
+
+
+class ARData: public RData
+{
+	public:
+		ARData(const void* d, size_t s): RData(d,s)
+		{
+			if ( s != 4 ) throw std::invalid_argument("wrong rdata size for A record");
+		}
+		virtual operator std::string() override
+		{
+			std::stringstream ss;
+			for (size_t i=0; i < size; i++)
+				ss << (int) ((const uint8_t*)data)[i] <<( (i!=size-1) ? "." : "");
+			return ss.str();
+		}
+};
+
+class AAAARData: public RData
+{
+	public:
+		AAAARData(const void* d, size_t s): RData(d,s)
+		{
+			if ( s != 16 ) throw std::invalid_argument("wrong rdata size for AAAA record");
+		};
+		virtual operator std::string() override
+		{
+			std::stringstream ss;
+
+			ss.setf(std::ios_base::hex, std::ios_base::basefield);
+
+			for (size_t i=0; i < size; i+=2)
+				ss << std::setw(2) << std::setfill('0') << (int) ((const uint8_t*)data)[i] 
+				   << std::setw(2) << std::setfill('0') << (int) ((const uint8_t*)data)[i+1]
+			   	   <<( (i!=size-1) ? ":" : "");
+
+			ss.unsetf(std::ios_base::hex);
+			return ss.str();
+		}
+};
+
+
 
 
 //could be linux/windows function, but platform is unspecified, so make own implementations
@@ -121,12 +196,30 @@ class MessageParser
 		header_t GetHeader();
 		question_t GetQuestion();
 		resource_record_t GetResourceRecord();
-		std::string GetDomainName(bool couldBeCompressed=true);
+		RData* GetRData(uint16_t type);
+	public: 
+		//TODO: split to two functions - one for lookback one normal
+		std::string GetDomainName(bool couldBeCompressed=true, size_t reverseLookupOffset = 0);
 
 	private:
 		size_t m_offset;
 		std::vector<uint8_t> m_raw_data;
 };
+
+class CNAMERData: public RData
+{
+	std::string m_domain;
+	public:
+		CNAMERData(const void* d, size_t s, std::string domain ): RData(d,s), m_domain(domain) {};
+		virtual operator std::string() override
+		{
+			return m_domain;
+		}
+};
+
+
+
+
 
 MessageParser::MessageParser(std::vector<uint8_t> message): 
 	m_raw_data(message), m_offset(0)
@@ -184,7 +277,7 @@ MessageParser::GetHeader()
 
 
 std::string
-MessageParser::GetDomainName(bool couldBeCompressed )
+MessageParser::GetDomainName(bool couldBeCompressed, size_t reverseLookupOffset )
 {
 	char domain[ MAX_NAME_LENGTH + 1];	
 	size_t dOffset = 0;
@@ -193,14 +286,14 @@ MessageParser::GetDomainName(bool couldBeCompressed )
 	size_t lSize;
 	bool   compressed = false;
 	
-	size_t offset = this->m_offset;
+	size_t offset =  this->m_offset;
 	uint8_t *data = this->m_raw_data.data();
 
 	while ( (lSize = data[offset]) != 0 )
 	{
 		if ( (lSize & 0xC0) == 0xC0)
 		{
-			if (!compressed)
+			if (!compressed )
 				this->m_offset+=1; 
 			compressed = true;
 			offset = ((data[offset] & 0x3f) << 8 ) | data[offset+1];
@@ -269,17 +362,62 @@ MessageParser::GetResourceRecord()
 	offset += sizeof(ret.TTL);
 
 
-	std::memcpy(&ret.RDLENGTH, data + offset, sizeof(ret.RDLENGTH));
-	ret.RDLENGTH = ntoh(ret.RDLENGTH);
-	offset += sizeof(ret.RDLENGTH);
+	//TODO: *RData here
+	ret.RDATA = this->GetRData(ret.TYPE);
 
-	//TODO: *RData
-	ret.RDATA = data + offset;
-	offset += ret.RDLENGTH;
 
 	return ret;
-
 }
+
+// https://www.cloudflare.com/learning/dns/dns-records/
+// https://en.wikipedia.org/wiki/List_of_DNS_record_types
+// I guess, it's enough to implement commonly-used subset and print hex for other things...
+// wait... where is AAAA record?
+// for other things add hex printer
+// maybe factory for rdata types?
+//std::unique_ptr<RData>
+RData*
+MessageParser::GetRData(uint16_t type)
+{
+	RData *ret;
+
+	uint8_t *data = this->m_raw_data.data();	
+	size_t &offset = this->m_offset;
+
+	uint16_t RDLENGTH;
+	std::memcpy(&RDLENGTH, data + offset, sizeof(RDLENGTH));
+	RDLENGTH = ntoh(RDLENGTH);
+	offset += sizeof(RDLENGTH);
+
+	void *RDATA = data + offset;
+	//offset += RDLENGTH;
+
+//https://www.cppstories.com/2018/02/factory-selfregister/
+// probably, not worth it. looks like clang fail to do this
+	if (type == 1)
+	{
+		ret = new ARData(RDATA,RDLENGTH);
+		offset += RDLENGTH;
+	}
+	else if (type == 28)
+	{
+		ret = new AAAARData(RDATA,RDLENGTH);
+		offset += RDLENGTH;
+	}
+	else if (type == 5)
+	{
+		std::string cname = this->GetDomainName();       
+		ret = new CNAMERData(RDATA, RDLENGTH, cname);
+	}
+	else
+	{
+		ret =	new RData( RDATA, RDLENGTH);
+		offset += RDLENGTH;
+	}
+	return ret;
+}
+
+
 
 dns_message_t
 MessageParser::GetDnsMessage()
@@ -347,13 +485,13 @@ std::ostream& operator<<(std::ostream& os, question_t q)
 	else
 		type ="unknown("+ std::to_string(q.QTYPE)+ ")";
 
-	os <<";; " << q.QNAME << "\t\t\t" << cl << "\t"<< type;
+	os <<";; " << q.QNAME << "\t\t\t" << cl << "\t"<< type ;
 	return os;
 }
 
 std::string print_rdata(uint16_t,const void *,uint16_t);
 
-std::ostream& operator<<(std::ostream& os, resource_record_t r)
+std::ostream& operator<<(std::ostream& os, const resource_record_t& r)
 {
 	/*
 ;; ANSWER SECTION:
@@ -374,126 +512,9 @@ example.com.		76391	IN	A	93.184.216.34
 		type ="unknown("+ std::to_string(r.TYPE)+ ")";
 
 
-	os << r.NAME << "\t\t" << r.TTL << "\t" << cl << "\t" << type << "\t" << print_rdata(r.TYPE, r.RDATA, r.RDLENGTH);
+	os << r.NAME << "\t\t" << r.TTL << "\t" << cl << "\t" << type << "\t" << (std::string) *r.RDATA;
 	return os;
 }
-
-
-class RData;
-RData* RDataBuilder( uint16_t type, const void *data, size_t len);
-
-
-class RData
-{
-	protected:
-		const void* data;
-		const size_t size;
-		RData(const void* d, size_t s): data(d), size(s) {};
-		friend  RData* RDataBuilder(uint16_t type, const void *data, size_t len);
-	public:
-		virtual operator std::string()
-		{
-			std::stringstream ss;
-			ss << "unknown rdata(" << this->size <<") hex: [";
-			ss.setf(std::ios_base::hex, std::ios_base::basefield);
-			ss.setf(std::ios_base::showbase);
-			for (size_t i=0; i< size; i++)
-				ss << (int) ((const uint8_t*)data)[i] << " ";
-
-			ss.unsetf(std::ios_base::hex);
-			ss<< "]";
-
-			return ss.str();
-		}
-};
-
-
-
-class ARData: public RData
-{
-	private:
-		ARData(const void* d, size_t s): RData(d,s)
-		{
-			if ( s != 4 ) throw std::invalid_argument("wrong rdata size for A record");
-		};
-		friend  RData* RDataBuilder(uint16_t type, const void *data, size_t len);
-	public:
-		virtual operator std::string() override
-		{
-			std::stringstream ss;
-			for (size_t i=0; i < size; i++)
-				ss << (int) ((const uint8_t*)data)[i] <<( (i!=size-1) ? "." : "");
-			return ss.str();
-		}
-};
-
-#include <iomanip>
-class AAAARData: public RData
-{
-	private:
-		AAAARData(const void* d, size_t s): RData(d,s)
-		{
-			if ( s != 16 ) throw std::invalid_argument("wrong rdata size for AAAA record");
-		};
-		friend  RData* RDataBuilder(uint16_t type, const void *data, size_t len);
-	public:
-		virtual operator std::string() override
-		{
-			std::stringstream ss;
-
-			ss.setf(std::ios_base::hex, std::ios_base::basefield);
-
-			for (size_t i=0; i < size; i+=2)
-				ss << std::setw(2) << std::setfill('0') << (int) ((const uint8_t*)data)[i] 
-				   << std::setw(2) << std::setfill('0') << (int) ((const uint8_t*)data)[i+1]
-			   	   <<( (i!=size-1) ? ":" : "");
-
-			ss.unsetf(std::ios_base::hex);
-			return ss.str();
-		}
-};
-
-class CNAMERData: public RData
-{
-	private:
-		CNAMERData(const void* d, size_t s): RData(d,s) {};
-		friend  RData* RDataBuilder(uint16_t type, const void *data, size_t len);
-	public:
-		virtual operator std::string() override
-		{
-
-		}
-};
-
-
-
-
-// https://www.cloudflare.com/learning/dns/dns-records/
-// https://en.wikipedia.org/wiki/List_of_DNS_record_types
-// I guess, it's enough to implement commonly-used subset and print hex for other things...
-// wait... where is AAAA record?
-// for other things add hex printer
-// maybe factory for rdata types?
-std::string print_rdata(uint16_t type,const void *data,uint16_t len)
-{
-	RData* rd = RDataBuilder(type, data, len);
-	std::string str = *rd;
-	delete rd;
-	return str;
-}
-
-
-// TODO: 
-//https://www.cppstories.com/2018/02/factory-selfregister/
-// probably, not worth it. looks like clang fail to do this
-RData * RDataBuilder( uint16_t type, const void *data, size_t len)
-{
-	if (type == 1) return new ARData(data,len);
-	if (type == 28) return new AAAARData(data,len);
-	return new RData( data, len);
-}
-
-
 
 
 
@@ -511,7 +532,7 @@ std::ostream& operator<<(std::ostream& os, dns_message_t d)
 	{
 		std::cout << ";; ANSWER SECTION:"<<std::endl;
 		for (const auto& it : d.Answer )
-			os <<it << std::endl;
+			os << it << std::endl;
 	}
 	if (d.Authority.size() ) 
 	{
