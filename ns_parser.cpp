@@ -52,10 +52,10 @@ struct resource_record_t{
 
 struct dns_message_t{
 	header_t Header;
-	question_t *Question;
-	resource_record_t *Answer;
-	resource_record_t *Authority;
-	resource_record_t *Additional;
+	std::vector<question_t> Question;
+	std::vector<resource_record_t> Answer;
+	std::vector<resource_record_t> Authority;
+	std::vector<resource_record_t> Additional;
 };	
 
 
@@ -84,7 +84,7 @@ class MessageParser
 	//private:
 		header_t GetHeader();
 		question_t GetQuestion();
-		resource_record_t GetRecrod();
+		resource_record_t GetResourceRecord();
 		std::string GetDomainName(bool couldBeCompressed=true);
 
 	private:
@@ -155,7 +155,6 @@ MessageParser::GetDomainName(bool couldBeCompressed )
 	size_t dOffset = 0;
 	domain[dOffset]=0;
 
-
 	size_t lSize;
 	bool   compressed = false;
 	
@@ -213,7 +212,7 @@ MessageParser::GetQuestion()
 }
 
 resource_record_t
-MessageParser::GetRecrod()
+MessageParser::GetResourceRecord()
 {
 	resource_record_t ret;
 	/*
@@ -254,6 +253,38 @@ MessageParser::GetRecrod()
 
 }
 
+dns_message_t
+MessageParser::GetDnsMessage()
+{
+	dns_message_t ret;
+	ret.Header = this->GetHeader();
+	if (ret.Header.QDCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
+	{
+		for (int i=0; i< ret.Header.QDCOUNT; i++) 
+			ret.Question.push_back( this->GetQuestion() );
+	}
+	if (ret.Header.ANCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
+	{
+		for (int i=0; i< ret.Header.ANCOUNT; i++) 
+			ret.Answer.push_back( this->GetResourceRecord() );
+	}
+	
+	if (ret.Header.NSCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
+	{
+		for (int i=0; i< ret.Header.NSCOUNT; i++) 
+			ret.Authority.push_back(this->GetResourceRecord() );
+	}
+	if (ret.Header.ARCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
+	{
+		for (int i=0; i< ret.Header.ARCOUNT; i++) 
+			ret.Additional.push_back(this->GetResourceRecord() );
+	}
+	return ret;
+}
+
+//------------------------------------------------
+// output methods
+
 std::ostream& operator<<(std::ostream& os, header_t h)
 {
 
@@ -284,55 +315,12 @@ print_question(const question_t &q)
 
 
 
-resource_record_t
-parse_record(const uint8_t * buff, size_t offset, size_t size, size_t &rOffset)
-{
-	/*
-	resource_record_t ret;
-	/*
-	std::string NAME;
-	uint16_t TYPE;
-	uint16_t CLASS;
-	uint32_t TTL;
-	uint16_t RDLENGTH;
-	void *RDATA;	
-	*/
-	/*
-	char domain[ MAX_NAME_LENGTH + 1];	
-	size_t dOffset = 0;
-	domain[dOffset]=0;
-	//dOffset = parse_name(domain, sizeof(domain), buff, offset, size); //TODO: see parse_question
-
-	ret.NAME = domain;
-
-	std::memcpy(&ret.TYPE, buff + dOffset, sizeof(ret.TYPE));   //TODO: make function.. probably with pointer to member... probably template for i32
-	ret.TYPE = ntohs(ret.TYPE);
-	dOffset += sizeof(ret.TYPE);
-
-	std::memcpy(&ret.CLASS, buff + dOffset, sizeof(ret.CLASS));
-	ret.CLASS = ntohs(ret.CLASS);
-	dOffset += sizeof(ret.CLASS);
-
-	std::memcpy(&ret.TTL, buff + dOffset, sizeof(ret.TTL));
-	ret.TTL = ntohl(ret.TTL);  // maybe ntoh() not C-like?
-	dOffset += sizeof(ret.TTL);
-
-
-	std::memcpy(&ret.RDLENGTH, buff + dOffset, sizeof(ret.RDLENGTH));
-	ret.RDLENGTH = ntohs(ret.RDLENGTH);
-	dOffset += sizeof(ret.RDLENGTH);
-
-	ret.RDATA = buff + dOffset;
-	dOffset += ret.RDLENGTH;
-
-	return ret;
-	*/
-};
-
 // https://www.cloudflare.com/learning/dns/dns-records/
 // https://en.wikipedia.org/wiki/List_of_DNS_record_types
 // I guess, it's enough to implement commonly-used subset and print hex for other things...
 // wait... where is AAAA record?
+// for other things add hex printer
+// maybe factory for rdata types?
 const char* print_rdata(uint16_t,const void *,uint16_t) { return "";}
 
 //TODO: make std::cout do it 
@@ -346,6 +334,8 @@ print_resourse_record(resource_record_t r)
 }
 
 
+//-------------------------------------------------------------------------------
+// functions to handle input
 
 uint8_t parse_raw(const char *buf)
 {
@@ -426,7 +416,7 @@ int main() {
 			std::cout << ";; ANSWER SECTION:"<<std::endl;
 			for (int i=0; i< header.ANCOUNT; i++) 
 			{
-				resource_record_t record = mp.GetRecrod();
+				resource_record_t record = mp.GetResourceRecord();
 				print_resourse_record(record);
 			}
 		}
