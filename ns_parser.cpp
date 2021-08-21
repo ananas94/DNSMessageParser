@@ -60,6 +60,24 @@ const std::unordered_map<uint16_t,std::string> classes = {
 	{255, "*"},   //QCLASS
 };
 
+
+const std::unordered_map<uint16_t,std::string> opcodes = {
+	{0,   "QUERY"},
+	{1,   "IQUERY"},
+	{2,   "STATUS"}
+};
+
+
+const std::unordered_map<uint16_t,std::string> statuses = {
+	{0,   "NOERROR"},
+	{1,   "FORMATERROR"},
+	{2,   "SERVERFAILURE"},
+	{3,   "NAMEERROR"},
+	{4,   "NOTIMPLEMENTED"},
+	{5,   "REFUSED"},
+
+};
+
 struct header_t{
 	uint16_t ID;
  	//not a real thing. could be usefull if we stuck to big-endianness, platform, compiller and sure about paddings 
@@ -83,7 +101,7 @@ struct resource_record_t{
 	uint16_t CLASS;
 	uint32_t TTL;
 	//TODO: memory safety unique_ptr and vector?? destructor?
-	RData *RDATA;
+	std::unique_ptr<RData> RDATA;
 };
 
 struct dns_message_t{
@@ -118,6 +136,7 @@ class RData
 
 			return ss.str();
 		}
+		virtual ~RData() =default;
 };
 
 
@@ -154,7 +173,7 @@ class AAAARData: public RData
 			for (size_t i=0; i < size; i+=2)
 				ss << std::setw(2) << std::setfill('0') << (int) ((const uint8_t*)data)[i] 
 				   << std::setw(2) << std::setfill('0') << (int) ((const uint8_t*)data)[i+1]
-			   	   <<( (i!=size-1) ? ":" : "");
+			   	   <<( (i!=size-2) ? ":" : "");
 
 			ss.unsetf(std::ios_base::hex);
 			return ss.str();
@@ -190,8 +209,7 @@ class MessageParser
 		header_t GetHeader();
 		question_t GetQuestion();
 		resource_record_t GetResourceRecord();
-		RData* GetRData(uint16_t type);
-	public: 
+		std::unique_ptr<RData> GetRData(uint16_t type);
 		std::string GetDomainName(bool couldBeCompressed=true);
 
 	private:
@@ -232,7 +250,7 @@ MessageParser::GetHeader()
 
 	std::memcpy(&ret.ID, data, sizeof(ret.ID));
 	ret.ID = ntoh(ret.ID);
-	this->m_offset =+ sizeof(ret.ID);
+	this->m_offset += sizeof(ret.ID);
 
 	uint16_t flags;
 	std::memcpy(&flags, data + this->m_offset , sizeof(flags));
@@ -354,10 +372,7 @@ MessageParser::GetResourceRecord()
 	ret.TTL = ntoh(ret.TTL); 
 	offset += sizeof(ret.TTL);
 
-
-	//TODO: *RData here
 	ret.RDATA = this->GetRData(ret.TYPE);
-
 
 	return ret;
 }
@@ -369,7 +384,7 @@ MessageParser::GetResourceRecord()
 // for other things add hex printer
 // maybe factory for rdata types?
 //std::unique_ptr<RData>
-RData*
+std::unique_ptr<RData>
 MessageParser::GetRData(uint16_t type)
 {
 	RData *ret;
@@ -407,7 +422,7 @@ MessageParser::GetRData(uint16_t type)
 		ret =	new RData( RDATA, RDLENGTH);
 		offset += RDLENGTH;
 	}
-	return ret;
+	return std::unique_ptr<RData>(ret);
 }
 
 
@@ -417,7 +432,7 @@ MessageParser::GetDnsMessage()
 {
 	dns_message_t ret;
 	ret.Header = this->GetHeader();
-	if (ret.Header.QDCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
+	if (ret.Header.QDCOUNT > 0 )  
 	{
 		for (int i=0; i< ret.Header.QDCOUNT; i++) 
 			ret.Question.push_back( this->GetQuestion() );
@@ -425,20 +440,20 @@ MessageParser::GetDnsMessage()
 	if (ret.Header.ANCOUNT > 0 )  
 	{
 		for (int i=0; i< ret.Header.ANCOUNT; i++) 
-			ret.Answer.push_back( this->GetResourceRecord() );
+			ret.Answer.push_back(std::move( this->GetResourceRecord() ) );
 	}
 	
 	if (ret.Header.NSCOUNT > 0 )  
 	{
 		for (int i=0; i< ret.Header.NSCOUNT; i++) 
-			ret.Authority.push_back(this->GetResourceRecord() );
+			ret.Authority.push_back( std::move (this->GetResourceRecord()) );
 	}
 	if (ret.Header.ARCOUNT > 0 )  
 	{
 		for (int i=0; i< ret.Header.ARCOUNT; i++) 
-			ret.Additional.push_back(this->GetResourceRecord() );
+			ret.Additional.push_back( std::move (this->GetResourceRecord()) );
 	}
-	return ret;
+	return std::move(ret);
 }
 
 //------------------------------------------------
@@ -451,9 +466,26 @@ std::ostream& operator<<(std::ostream& os, header_t h)
 ;; ->>HEADER<<- opcode: QUERY; status: NOERROR; id: 28028
 ;; Flags: qr rd ra; QUERY: 1; ANSWER: 1; AUTHORITY: 0; ADDITIONAL: 0
 */
-	os << ";; ->>HEADER<<- opcode: " << h.Opcode << "; status: " << h.RCODE << "; id: " <<h.ID << std::endl;
-	os << ";; Flags: qr " << h.QR << "AA: "<< h.AA << " TC " <<h.TC<<" RD "<<h.RD<<" RA " <<h.RA <<" Z " <<h.Z <<std::endl;
-	os << "QUER " <<h.QDCOUNT << " AN "<< h.ANCOUNT <<" NS " << h.NSCOUNT << " AR " << h.ARCOUNT;
+	std::string opcode;
+	if ( opcodes.find(h.Opcode) != opcodes.end() )
+		opcode = opcodes.at(h.Opcode);
+	else
+		opcode ="unknown("+ std::to_string(h.Opcode) +")";
+
+	std::string status;
+	if ( statuses.find(h.RCODE) != statuses.end() )
+		status = statuses.at(h.RCODE);
+	else
+		status ="unknown("+ std::to_string(h.RCODE) +")";
+	
+	std::stringstream flagss;
+	flagss << (h.QR ? " qr" : "") << ( h.AA ? " aa" : "")  << (h.TC ? " tc" : "") << (h.RD ? " rd" : "") << (h.RA ? " ra" : "");
+	std::string flags = flagss.str();
+	
+	
+	os << ";; ->>HEADER<<- opcode: " << opcode << "; status: " << status << "; id: " <<h.ID << std::endl;
+	os << ";; Flags:" << flags;
+	os << "; QUERY " <<h.QDCOUNT << "; ANSWER "<< h.ANCOUNT <<"; AUTHORITY " << h.NSCOUNT << "; ADDITIONAL " << h.ARCOUNT;
 	return os;
 };
 
@@ -485,7 +517,7 @@ std::ostream& operator<<(std::ostream& os, question_t q)
 std::string print_rdata(uint16_t,const void *,uint16_t);
 
 
-std::ostream& operator<<(std::ostream& os, RData* d)
+std::ostream& operator<<(std::ostream& os, const std::unique_ptr<RData>& d)
 {
 	os << ( std::string) *d;
 	return os;
@@ -519,7 +551,7 @@ example.com.		76391	IN	A	93.184.216.34
 
 
 
-std::ostream& operator<<(std::ostream& os, dns_message_t d)
+std::ostream& operator<<(std::ostream& os, const dns_message_t& d)
 {
 	os << d.Header << std::endl;
 	if (d.Question.size() ) 
@@ -530,19 +562,19 @@ std::ostream& operator<<(std::ostream& os, dns_message_t d)
 	}
 	if (d.Answer.size() ) 
 	{
-		std::cout << ";; ANSWER SECTION:";
+		std::cout <<std::endl << ";; ANSWER SECTION:";
 		for (const auto& it : d.Answer )
 			os << std::endl << it ;
 	}
 	if (d.Authority.size() ) 
 	{
-		std::cout << ";; AUTHORATIVE NAMESERVERS SECTION:";
+		std::cout <<std::endl << ";; AUTHORATIVE NAMESERVERS SECTION:";
 		for (const auto& it : d.Authority )
 			os << std::endl <<it ;
 	}
 	if (d.Additional.size() ) 
 	{
-		std::cout << ";; ADDITIONAL RECORDS SECTION:";
+		std::cout <<std::endl << ";; ADDITIONAL RECORDS SECTION:";
 		for (const auto& it : d.Additional )
 			os << std::endl <<it ; 
 	}
@@ -581,7 +613,7 @@ parse_input_string(std::string str)
 	       	str[strSize-1] != '"'   
 	   )  
 	{
-		std::string errMsg; //TODO: on c++20 std::format me 
+		std::string errMsg; 
 		errMsg+="\"";
 		errMsg+=str;
 		errMsg+="\" is not hex formatted string";
