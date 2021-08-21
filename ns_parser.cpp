@@ -27,6 +27,40 @@
 const size_t UDP_SIZE_LIMIT=512;
 const size_t MAX_NAME_LENGTH=255;
 
+const std::unordered_map<uint16_t,std::string> types = {
+	{1, "A"},  
+	{2, "NS"}, 
+	{3, "MD"},   
+	{4, "MF"}, 
+	{5, "CNAME"}, 
+	{6, "SOA"}, 
+	{7, "MB"},  
+	{8, "MG"},  
+	{9, "MR"}, 
+	{10, "NULL"},
+	{11, "WKS"},
+	{12, "PTR"},
+	{13, "HINFO"}, 
+	{14, "MINFO"}, 
+	{15, "MX"}, 
+	{16, "TXT"},
+
+	{28, "AAAA"},
+
+	{252, "AXFR"},   //QTYPES
+	{253, "MAILB"},
+	{254, "MAILA"},
+	{255, "*"}
+};
+
+const std::unordered_map<uint16_t,std::string> classes = {
+	{1,   "IN"},
+	{2,   "CS"},
+	{3,   "CH"},
+	{4,   "HS"},
+	{255, "*"},   //QCLASS
+};
+
 struct header_t{
 	uint16_t ID;
  	//not a real thing. could be usefull if we stuck to big-endianness, platform, compiller and sure about paddings 
@@ -239,6 +273,7 @@ MessageParser::GetResourceRecord()
 	ret.RDLENGTH = ntoh(ret.RDLENGTH);
 	offset += sizeof(ret.RDLENGTH);
 
+	//TODO: *RData
 	ret.RDATA = data + offset;
 	offset += ret.RDLENGTH;
 
@@ -299,11 +334,24 @@ std::ostream& operator<<(std::ostream& os, question_t q)
     ;; QUESTION SECTION:
     ;; example.com.			IN	A
 */
-	os <<";; " << q.QNAME << "\t\t\t" << q.QCLASS << "\t"<< q.QTYPE ;
+	std::string cl;
+	std::string type;
+
+	if ( classes.find(q.QCLASS) != classes.end() )
+		cl = classes.at(q.QCLASS);
+	else
+		cl ="unknown("+ std::to_string(q.QCLASS) +")";
+	
+	if ( types.find(q.QTYPE) != types.end() )
+		type = types.at(q.QTYPE);
+	else
+		type ="unknown("+ std::to_string(q.QTYPE)+ ")";
+
+	os <<";; " << q.QNAME << "\t\t\t" << cl << "\t"<< type;
 	return os;
 }
 
-const char* print_rdata(uint16_t,const void *,uint16_t);
+std::string print_rdata(uint16_t,const void *,uint16_t);
 
 std::ostream& operator<<(std::ostream& os, resource_record_t r)
 {
@@ -311,9 +359,111 @@ std::ostream& operator<<(std::ostream& os, resource_record_t r)
 ;; ANSWER SECTION:
 example.com.		76391	IN	A	93.184.216.34
 	 */
-	os << r.NAME << "\t\t" << r.TTL << "\t" << r.CLASS << "\t" << r.TYPE << "\t" << print_rdata(r.TYPE, r.RDATA, r.RDLENGTH);
+
+	std::string cl;
+	std::string type;
+
+	if ( classes.find(r.CLASS) != classes.end() )
+		cl = classes.at(r.CLASS);
+	else
+		cl ="unknown("+ std::to_string(r.CLASS) +")";
+	
+	if ( types.find(r.TYPE) != types.end() )
+		type = types.at(r.TYPE);
+	else
+		type ="unknown("+ std::to_string(r.TYPE)+ ")";
+
+
+	os << r.NAME << "\t\t" << r.TTL << "\t" << cl << "\t" << type << "\t" << print_rdata(r.TYPE, r.RDATA, r.RDLENGTH);
 	return os;
 }
+
+
+class RData;
+RData* RDataBuilder( uint16_t type, const void *data, size_t len);
+
+
+class RData
+{
+	protected:
+		const void* data;
+		const size_t size;
+		RData(const void* d, size_t s): data(d), size(s) {};
+		friend  RData* RDataBuilder(uint16_t type, const void *data, size_t len);
+	public:
+		virtual operator std::string()
+		{
+			std::stringstream ss;
+			ss << "unknown rdata(" << this->size <<") hex: [";
+			ss.setf(std::ios_base::hex, std::ios_base::basefield);
+			ss.setf(std::ios_base::showbase);
+			for (size_t i=0; i< size; i++)
+				ss << (int) ((const uint8_t*)data)[i] << " ";
+
+			ss.unsetf(std::ios_base::hex);
+			ss<< "]";
+
+			return ss.str();
+		}
+};
+
+
+
+class ARData: public RData
+{
+	private:
+		ARData(const void* d, size_t s): RData(d,s)
+		{
+			if ( s != 4 ) throw std::invalid_argument("wrong rdata size for A record");
+		};
+		friend  RData* RDataBuilder(uint16_t type, const void *data, size_t len);
+	public:
+		virtual operator std::string() override
+		{
+			std::stringstream ss;
+			for (size_t i=0; i < size; i++)
+				ss << (int) ((const uint8_t*)data)[i] <<( (i!=size-1) ? "." : "");
+			return ss.str();
+		}
+};
+
+#include <iomanip>
+class AAAARData: public RData
+{
+	private:
+		AAAARData(const void* d, size_t s): RData(d,s)
+		{
+			if ( s != 16 ) throw std::invalid_argument("wrong rdata size for AAAA record");
+		};
+		friend  RData* RDataBuilder(uint16_t type, const void *data, size_t len);
+	public:
+		virtual operator std::string() override
+		{
+			std::stringstream ss;
+
+			ss.setf(std::ios_base::hex, std::ios_base::basefield);
+
+			for (size_t i=0; i < size; i+=2)
+				ss << std::setw(2) << std::setfill('0') << (int) ((const uint8_t*)data)[i] 
+				   << std::setw(2) << std::setfill('0') << (int) ((const uint8_t*)data)[i+1]
+			   	   <<( (i!=size-1) ? ":" : "");
+
+			ss.unsetf(std::ios_base::hex);
+			return ss.str();
+		}
+};
+
+class CNAMERData: public RData
+{
+	private:
+		CNAMERData(const void* d, size_t s): RData(d,s) {};
+		friend  RData* RDataBuilder(uint16_t type, const void *data, size_t len);
+	public:
+		virtual operator std::string() override
+		{
+
+		}
+};
 
 
 
@@ -324,7 +474,26 @@ example.com.		76391	IN	A	93.184.216.34
 // wait... where is AAAA record?
 // for other things add hex printer
 // maybe factory for rdata types?
-const char* print_rdata(uint16_t,const void *,uint16_t) { return "";}
+std::string print_rdata(uint16_t type,const void *data,uint16_t len)
+{
+	RData* rd = RDataBuilder(type, data, len);
+	std::string str = *rd;
+	delete rd;
+	return str;
+}
+
+
+// TODO: 
+//https://www.cppstories.com/2018/02/factory-selfregister/
+// probably, not worth it. looks like clang fail to do this
+RData * RDataBuilder( uint16_t type, const void *data, size_t len)
+{
+	if (type == 1) return new ARData(data,len);
+	if (type == 28) return new AAAARData(data,len);
+	return new RData( data, len);
+}
+
+
 
 
 
