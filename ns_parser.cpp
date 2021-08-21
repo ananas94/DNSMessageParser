@@ -1,3 +1,5 @@
+//TODO: move sematic?
+
 #include <map>
 #include <set>
 #include <list>
@@ -62,14 +64,14 @@ struct dns_message_t{
 //could be linux/windows function, but platform is unspecified, so make own implementations
 // TODO: add ifdef
 uint16_t
-ntohs(uint16_t net)
+ntoh(uint16_t net)
 {
 	uint16_t ret = (net & 0xff) << 8 | (net & 0xff00) >> 8;
 	return ret;
 
 }
 uint32_t
-ntohl(uint32_t net)
+ntoh(uint32_t net)
 {
 	uint32_t ret = (net & 0xff000000) >> 24 | (net & 0xff0000) >> 8 | (net & 0xff00) << 8 | (net & 0xff) <<24;
 	return ret;
@@ -81,7 +83,7 @@ class MessageParser
 	public:
 		MessageParser(std::vector<uint8_t> message);
 		dns_message_t GetDnsMessage();
-	//private:
+	private:
 		header_t GetHeader();
 		question_t GetQuestion();
 		resource_record_t GetResourceRecord();
@@ -92,7 +94,6 @@ class MessageParser
 		std::vector<uint8_t> m_raw_data;
 };
 
-//TODO: should I add move semantic here?
 MessageParser::MessageParser(std::vector<uint8_t> message): 
 	m_raw_data(message), m_offset(0)
 {}
@@ -110,12 +111,12 @@ MessageParser::GetHeader()
 	uint8_t *data = this->m_raw_data.data();
 
 	std::memcpy(&ret.ID, data, sizeof(ret.ID));
-	ret.ID = ntohs(ret.ID);
+	ret.ID = ntoh(ret.ID);
 	this->m_offset =+ sizeof(ret.ID);
 
 	uint16_t flags;
 	std::memcpy(&flags, data + this->m_offset , sizeof(flags));
-	flags = ntohs(flags);
+	flags = ntoh(flags);
 
 	ret.RCODE = flags & 0xF;
 	ret.Z = (flags >> 4) & 0x111;
@@ -129,19 +130,19 @@ MessageParser::GetHeader()
 	this->m_offset += sizeof(flags);
 
 	std::memcpy(&ret.QDCOUNT, data + this->m_offset, sizeof(ret.QDCOUNT));
-	ret.QDCOUNT = ntohs(ret.QDCOUNT);
+	ret.QDCOUNT = ntoh(ret.QDCOUNT);
 	this->m_offset += sizeof(ret.QDCOUNT);
 
 	std::memcpy(&ret.ANCOUNT, data + this->m_offset, sizeof(ret.ANCOUNT));
-	ret.ANCOUNT = ntohs(ret.ANCOUNT);
+	ret.ANCOUNT = ntoh(ret.ANCOUNT);
 	this->m_offset += sizeof(ret.ANCOUNT);
 
 	std::memcpy(&ret.NSCOUNT, data + this->m_offset, sizeof(ret.NSCOUNT));
-	ret.NSCOUNT = ntohs(ret.NSCOUNT);
+	ret.NSCOUNT = ntoh(ret.NSCOUNT);
 	this->m_offset += sizeof(ret.NSCOUNT);
 
 	std::memcpy(&ret.ARCOUNT, data + this->m_offset, sizeof(ret.ARCOUNT));
-	ret.ARCOUNT = ntohs(ret.ARCOUNT);
+	ret.ARCOUNT = ntoh(ret.ARCOUNT);
 	this->m_offset += sizeof(ret.ARCOUNT);
 
 	return ret;
@@ -165,7 +166,8 @@ MessageParser::GetDomainName(bool couldBeCompressed )
 	{
 		if ( (lSize & 0xC0) == 0xC0)
 		{
-			this->m_offset+=1; 
+			if (!compressed)
+				this->m_offset+=1; 
 			compressed = true;
 			offset = ((data[offset] & 0x3f) << 8 ) | data[offset+1];
 		}
@@ -200,12 +202,12 @@ MessageParser::GetQuestion()
 	uint8_t *data = this->m_raw_data.data();
 
 	std::memcpy(&ret.QTYPE, data + this->m_offset, sizeof(ret.QTYPE));
-	ret.QTYPE = ntohs(ret.QTYPE);
+	ret.QTYPE = ntoh(ret.QTYPE);
 	this->m_offset += sizeof(ret.QTYPE);
 
 
 	std::memcpy(&ret.QCLASS, data + this->m_offset, sizeof(ret.QCLASS));
-	ret.QCLASS = ntohs(ret.QCLASS);
+	ret.QCLASS = ntoh(ret.QCLASS);
 	this->m_offset += sizeof(ret.QCLASS);
 
 	return ret;
@@ -215,35 +217,26 @@ resource_record_t
 MessageParser::GetResourceRecord()
 {
 	resource_record_t ret;
-	/*
-	std::string NAME;
-	uint16_t TYPE;
-	uint16_t CLASS;
-	uint32_t TTL;
-	uint16_t RDLENGTH;
-	void *RDATA;	
-	*/
 	ret.NAME = this->GetDomainName();
-	//dOffset = parse_name(domain, sizeof(domain), buff, offset, size); //TODO: see parse_question
 
 	uint8_t *data = this->m_raw_data.data();	
 	size_t &offset = this->m_offset;
 
-	std::memcpy(&ret.TYPE, data + offset, sizeof(ret.TYPE));   //TODO: make function.. probably with pointer to member... probably template for i32
-	ret.TYPE = ntohs(ret.TYPE);
+	std::memcpy(&ret.TYPE, data + offset, sizeof(ret.TYPE));   
+	ret.TYPE = ntoh(ret.TYPE);
 	offset += sizeof(ret.TYPE);
 
 	std::memcpy(&ret.CLASS, data + offset, sizeof(ret.CLASS));
-	ret.CLASS = ntohs(ret.CLASS);
+	ret.CLASS = ntoh(ret.CLASS);
 	offset += sizeof(ret.CLASS);
 
 	std::memcpy(&ret.TTL, data + offset, sizeof(ret.TTL));
-	ret.TTL = ntohl(ret.TTL);  // maybe ntoh() not C-like?
+	ret.TTL = ntoh(ret.TTL); 
 	offset += sizeof(ret.TTL);
 
 
 	std::memcpy(&ret.RDLENGTH, data + offset, sizeof(ret.RDLENGTH));
-	ret.RDLENGTH = ntohs(ret.RDLENGTH);
+	ret.RDLENGTH = ntoh(ret.RDLENGTH);
 	offset += sizeof(ret.RDLENGTH);
 
 	ret.RDATA = data + offset;
@@ -263,18 +256,18 @@ MessageParser::GetDnsMessage()
 		for (int i=0; i< ret.Header.QDCOUNT; i++) 
 			ret.Question.push_back( this->GetQuestion() );
 	}
-	if (ret.Header.ANCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
+	if (ret.Header.ANCOUNT > 0 )  
 	{
 		for (int i=0; i< ret.Header.ANCOUNT; i++) 
 			ret.Answer.push_back( this->GetResourceRecord() );
 	}
 	
-	if (ret.Header.NSCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
+	if (ret.Header.NSCOUNT > 0 )  
 	{
 		for (int i=0; i< ret.Header.NSCOUNT; i++) 
 			ret.Authority.push_back(this->GetResourceRecord() );
 	}
-	if (ret.Header.ARCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
+	if (ret.Header.ARCOUNT > 0 )  
 	{
 		for (int i=0; i< ret.Header.ARCOUNT; i++) 
 			ret.Additional.push_back(this->GetResourceRecord() );
@@ -294,24 +287,34 @@ std::ostream& operator<<(std::ostream& os, header_t h)
 */
 	os << ";; ->>HEADER<<- opcode: " << h.Opcode << "; status: " << h.RCODE << "; id: " <<h.ID << std::endl;
 	os << ";; Flags: qr " << h.QR << "AA: "<< h.AA << " TC " <<h.TC<<" RD "<<h.RD<<" RA " <<h.RA <<" Z " <<h.Z <<std::endl;
-	os << "QUER " <<h.QDCOUNT << " AN "<< h.ANCOUNT <<" NS " << h.NSCOUNT << " AR " << h.ARCOUNT << std::endl;
+	os << "QUER " <<h.QDCOUNT << " AN "<< h.ANCOUNT <<" NS " << h.NSCOUNT << " AR " << h.ARCOUNT;
 	return os;
 };
 
 
 
-
-
-//TODO: make std::cout do it 
-void
-print_question(const question_t &q)
+std::ostream& operator<<(std::ostream& os, question_t q)
 {
 /*
     ;; QUESTION SECTION:
     ;; example.com.			IN	A
 */
-	std::cout << q.QNAME << "\t\t\t" << q.QCLASS << "\t"<< q.QTYPE <<std::endl;
+	os <<";; " << q.QNAME << "\t\t\t" << q.QCLASS << "\t"<< q.QTYPE ;
+	return os;
 }
+
+const char* print_rdata(uint16_t,const void *,uint16_t);
+
+std::ostream& operator<<(std::ostream& os, resource_record_t r)
+{
+	/*
+;; ANSWER SECTION:
+example.com.		76391	IN	A	93.184.216.34
+	 */
+	os << r.NAME << "\t\t" << r.TTL << "\t" << r.CLASS << "\t" << r.TYPE << "\t" << print_rdata(r.TYPE, r.RDATA, r.RDLENGTH);
+	return os;
+}
+
 
 
 
@@ -323,15 +326,41 @@ print_question(const question_t &q)
 // maybe factory for rdata types?
 const char* print_rdata(uint16_t,const void *,uint16_t) { return "";}
 
-//TODO: make std::cout do it 
-void
-print_resourse_record(resource_record_t r)
+
+
+std::ostream& operator<<(std::ostream& os, dns_message_t d)
 {
-	/*
-		example.com.		76391	IN	A	93.184.216.34
-	   */
-	std::cout << r.NAME << "\t\t" << r.TTL << "\t" << r.CLASS << "\t" << r.TYPE << "\t" << print_rdata(r.TYPE, r.RDATA, r.RDLENGTH) << std::endl;
+//TODO: \n on last record??
+	os << d.Header << std::endl;
+	if (d.Question.size() ) 
+	{	//TODO: check if RFC forbid QDCOUNT == 0
+		os << ";; QUESTION SECTION:"<<std::endl;
+		for (const auto& it : d.Question )
+			os <<it << std::endl;
+	}
+	if (d.Answer.size() ) 
+	{
+		std::cout << ";; ANSWER SECTION:"<<std::endl;
+		for (const auto& it : d.Answer )
+			os <<it << std::endl;
+	}
+	if (d.Authority.size() ) 
+	{
+		std::cout << ";; AUTHORATIVE NAMESERVERS SECTION:"<<std::endl;
+		for (const auto& it : d.Authority )
+			os <<it << std::endl;
+	}
+	if (d.Additional.size() ) 
+	{
+		std::cout << ";; ADDITIONAL RECORDS SECTION:"<<std::endl;
+		for (const auto& it : d.Additional )
+			os <<it << std::endl; 
+	}
+	return os;
 }
+
+
+
 
 
 //-------------------------------------------------------------------------------
@@ -379,7 +408,7 @@ parse_input_string(std::string str)
 }
 
 int main() {
-    /* Enter your code here. Read input from STDIN. Print output to STDOUT */
+	/* Enter your code here. Read input from STDIN. Print output to STDOUT */
 	try{
 		std::vector<uint8_t> raw_data;
 		while (std::cin.good())
@@ -400,69 +429,8 @@ int main() {
 
 		MessageParser mp(raw_data);
 
-		header_t header = mp.GetHeader();
-		std::cout << header;
-		if (header.QDCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
-		{
-			std::cout << ";; QUESTION SECTION:"<<std::endl;
-			for (int i=0; i< header.QDCOUNT; i++) 
-			{
-				question_t question = mp.GetQuestion();
-				print_question(question);
-			}
-		}
-		if (header.ANCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
-		{
-			std::cout << ";; ANSWER SECTION:"<<std::endl;
-			for (int i=0; i< header.ANCOUNT; i++) 
-			{
-				resource_record_t record = mp.GetResourceRecord();
-				print_resourse_record(record);
-			}
-		}
-	
-
-		/*
-		size_t qOffset = 0;
-		if (header.QDCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
-		{
-			std::cout << ";; QUESTION SECTION:"<<std::endl;
-			for (int i=0; i< header.QDCOUNT; i++) 
-			{
-				question_t question = parse_question(raw_data.data(), qOffset + headerOffset, raw_data.size(), qOffset);
-				print_question(question);
-			}
-		}
-		size_t resourceRecordOffset = 0;
-		if (header.ANCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
-		{
-			std::cout << ";; ANSWER SECTION:"<<std::endl;
-			for (int i=0; i< header.ANCOUNT; i++) 
-			{
-				resource_record_t record = parse_record(raw_data.data(), qOffset + resourceRecordOffset + headerOffset, raw_data.size(), resourceRecordOffset);
-				print_resourse_record(record);
-			}
-		}
-		if (header.NSCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
-		{
-			std::cout << ";; AUTHORATIVE NAMESERVERS SECTION:"<<std::endl;
-			for (int i=0; i< header.NSCOUNT; i++) 
-			{
-				resource_record_t record = parse_record(raw_data.data(), qOffset + resourceRecordOffset + headerOffset, raw_data.size(), resourceRecordOffset);
-				print_resourse_record(record);
-			}
-		}
-		if (header.ARCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
-		{
-			std::cout << ";; ADDITIONAL RECORDS SECTION:"<<std::endl;
-			for (int i=0; i< header.ARCOUNT; i++) 
-			{
-				resource_record_t record = parse_record(raw_data.data(), qOffset + resourceRecordOffset + headerOffset, raw_data.size(), resourceRecordOffset);
-				print_resourse_record(record);
-			}
-		}
-		*/
-
+		dns_message_t dm = mp.GetDnsMessage();
+		std::cout << dm;
 	}
 	catch (std::invalid_argument e)
 	{
@@ -470,5 +438,5 @@ int main() {
 		throw;
 	}
 	
-    return 0;
+	return 0;
 }
