@@ -233,7 +233,7 @@ class CNAMERData: public RData
 
 
 MessageParser::MessageParser(std::vector<uint8_t> message): 
-	m_raw_data(message), m_offset(0)
+	 m_offset(0), m_raw_data(message)
 {}
 
 header_t
@@ -440,20 +440,20 @@ MessageParser::GetDnsMessage()
 	if (ret.Header.ANCOUNT > 0 )  
 	{
 		for (int i=0; i< ret.Header.ANCOUNT; i++) 
-			ret.Answer.push_back(std::move( this->GetResourceRecord() ) );
+			ret.Answer.push_back( this->GetResourceRecord() ) ;
 	}
 	
 	if (ret.Header.NSCOUNT > 0 )  
 	{
 		for (int i=0; i< ret.Header.NSCOUNT; i++) 
-			ret.Authority.push_back( std::move (this->GetResourceRecord()) );
+			ret.Authority.push_back( this->GetResourceRecord()) ;
 	}
 	if (ret.Header.ARCOUNT > 0 )  
 	{
 		for (int i=0; i< ret.Header.ARCOUNT; i++) 
-			ret.Additional.push_back( std::move (this->GetResourceRecord()) );
+			ret.Additional.push_back( this->GetResourceRecord()) ;
 	}
-	return std::move(ret);
+	return ret;
 }
 
 //------------------------------------------------
@@ -622,7 +622,7 @@ parse_input_string(std::string str)
 
 	const char *strCStr = str.c_str();
 	std::vector<uint8_t> ret(strSize/4);
-	for (int i = 0; i<strSize/4; i++)
+	for (size_t i = 0; i < strSize / 4; i++)
 	{
 		ret[i] = parse_raw(strCStr + 1 + 4*i);
 	}
@@ -640,7 +640,8 @@ int main() {
 
 			std::cin >> input;
 
-			if (input.size() == 1 && input[0] == '\\' || input.size()==0 ) continue; // copy-paste to terminal from hackerrank add empty lines to input, so ignore 0-sized strings
+			if ( (input.size() == 1 && input[0] == '\\')
+				     	|| input.size()==0 ) continue; // copy-paste to terminal from hackerrank add empty lines to input, so ignore 0-sized strings
 
 			auto raw_string_data = parse_input_string(input);
 
@@ -654,7 +655,7 @@ int main() {
 		dns_message_t dm = mp.GetDnsMessage();
 		std::cout << dm<< std::endl;
 	}
-	catch (std::invalid_argument e)
+	catch (std::invalid_argument& e)
 	{
 		std::cout << e.what();
 		throw;
