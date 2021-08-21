@@ -363,6 +363,27 @@ int main() {
 				print_resourse_record(record);
 			}
 		}
+		if (header.NSCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
+		{
+			std::cout << ";; AUTHORATIVE NAMESERVERS SECTION:"<<std::endl;
+			for (int i=0; i< header.NSCOUNT; i++) 
+			{
+				resource_record_t record = parse_record(raw_data.data(), qOffset + resourceRecordOffset + headerOffset, raw_data.size(), resourceRecordOffset);
+				print_resourse_record(record);
+			}
+		}
+		if (header.ARCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
+		{
+			std::cout << ";; ADDITIONAL RECORDS SECTION:"<<std::endl;
+			for (int i=0; i< header.ARCOUNT; i++) 
+			{
+				resource_record_t record = parse_record(raw_data.data(), qOffset + resourceRecordOffset + headerOffset, raw_data.size(), resourceRecordOffset);
+				print_resourse_record(record);
+			}
+		}
+
+
+
 
 	}
 	catch (std::invalid_argument e)
