@@ -84,12 +84,6 @@ struct resource_record_t{
 	uint32_t TTL;
 	//TODO: memory safety unique_ptr and vector?? destructor?
 	RData *RDATA;
-	//std::unique_ptr<RData> RDATA;
-
-	/*
-	uint16_t RDLENGTH;
-	const void *RDATA;	
-	*/
 };
 
 struct dns_message_t{
@@ -198,8 +192,7 @@ class MessageParser
 		resource_record_t GetResourceRecord();
 		RData* GetRData(uint16_t type);
 	public: 
-		//TODO: split to two functions - one for lookback one normal
-		std::string GetDomainName(bool couldBeCompressed=true, size_t reverseLookupOffset = 0);
+		std::string GetDomainName(bool couldBeCompressed=true);
 
 	private:
 		size_t m_offset;
@@ -277,7 +270,7 @@ MessageParser::GetHeader()
 
 
 std::string
-MessageParser::GetDomainName(bool couldBeCompressed, size_t reverseLookupOffset )
+MessageParser::GetDomainName(bool couldBeCompressed)
 {
 	char domain[ MAX_NAME_LENGTH + 1];	
 	size_t dOffset = 0;
@@ -491,6 +484,14 @@ std::ostream& operator<<(std::ostream& os, question_t q)
 
 std::string print_rdata(uint16_t,const void *,uint16_t);
 
+
+std::ostream& operator<<(std::ostream& os, RData* d)
+{
+	os << ( std::string) *d;
+	return os;
+}
+
+
 std::ostream& operator<<(std::ostream& os, const resource_record_t& r)
 {
 	/*
@@ -512,7 +513,7 @@ example.com.		76391	IN	A	93.184.216.34
 		type ="unknown("+ std::to_string(r.TYPE)+ ")";
 
 
-	os << r.NAME << "\t\t" << r.TTL << "\t" << cl << "\t" << type << "\t" << (std::string) *r.RDATA;
+	os << r.NAME << "\t\t" << r.TTL << "\t" << cl << "\t" << type << "\t" <<  r.RDATA;
 	return os;
 }
 
@@ -520,31 +521,30 @@ example.com.		76391	IN	A	93.184.216.34
 
 std::ostream& operator<<(std::ostream& os, dns_message_t d)
 {
-//TODO: \n on last record??
 	os << d.Header << std::endl;
 	if (d.Question.size() ) 
-	{	//TODO: check if RFC forbid QDCOUNT == 0
-		os << ";; QUESTION SECTION:"<<std::endl;
+	{
+		os << ";; QUESTION SECTION:";
 		for (const auto& it : d.Question )
-			os <<it << std::endl;
+			os << std::endl <<it ;
 	}
 	if (d.Answer.size() ) 
 	{
-		std::cout << ";; ANSWER SECTION:"<<std::endl;
+		std::cout << ";; ANSWER SECTION:";
 		for (const auto& it : d.Answer )
-			os << it << std::endl;
+			os << std::endl << it ;
 	}
 	if (d.Authority.size() ) 
 	{
-		std::cout << ";; AUTHORATIVE NAMESERVERS SECTION:"<<std::endl;
+		std::cout << ";; AUTHORATIVE NAMESERVERS SECTION:";
 		for (const auto& it : d.Authority )
-			os <<it << std::endl;
+			os << std::endl <<it ;
 	}
 	if (d.Additional.size() ) 
 	{
-		std::cout << ";; ADDITIONAL RECORDS SECTION:"<<std::endl;
+		std::cout << ";; ADDITIONAL RECORDS SECTION:";
 		for (const auto& it : d.Additional )
-			os <<it << std::endl; 
+			os << std::endl <<it ; 
 	}
 	return os;
 }
@@ -620,7 +620,7 @@ int main() {
 		MessageParser mp(raw_data);
 
 		dns_message_t dm = mp.GetDnsMessage();
-		std::cout << dm;
+		std::cout << dm<< std::endl;
 	}
 	catch (std::invalid_argument e)
 	{
