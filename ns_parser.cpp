@@ -265,6 +265,7 @@ parse_record(const uint8_t * buff, size_t offset, size_t size, size_t &rOffset)
 };
 
 // https://www.cloudflare.com/learning/dns/dns-records/
+// https://en.wikipedia.org/wiki/List_of_DNS_record_types
 // I guess, it's enough to implement commonly-used subset and print hex for other things...
 // wait... where is AAAA record?
 const char* print_rdata(uint16_t,const void *,uint16_t) { return "";}
