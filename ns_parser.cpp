@@ -1,23 +1,9 @@
-//TODO: move sematic?
-
-#include <map>
-#include <set>
-#include <list>
-#include <cmath>
-#include <ctime>
 #include <string>
-#include <bitset>
 #include <cstdio>
-#include <limits>
 #include <vector>
-#include <climits>
 #include <cstring>
-#include <cstdlib>
-#include <fstream>
-#include <numeric>
 #include <sstream>
 #include <iostream>
-#include <algorithm>
 #include <unordered_map>
 #include <cstdint>
 #include <memory>
@@ -398,7 +384,6 @@ MessageParser::GetRData(uint16_t type)
 	offset += sizeof(RDLENGTH);
 
 	void *RDATA = data + offset;
-	//offset += RDLENGTH;
 
 //https://www.cppstories.com/2018/02/factory-selfregister/
 // probably, not worth it. looks like clang fail to do this
