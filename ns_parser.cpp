@@ -27,7 +27,8 @@ const size_t MAX_NAME_LENGTH=255;
 
 struct header_t{
 	uint16_t ID;
-	uint16_t QR:1,Opcode:4,AA:1,TC:1,RD:1,RA:1,Z:1,RCODE:4; //not a real thing. could be usefull if we stuck to big-endianness, platform, compiller and sure about paddings 
+ 	//not a real thing. could be usefull if we stuck to big-endianness, platform, compiller and sure about paddings 
+	uint16_t QR:1,Opcode:4,AA:1,TC:1,RD:1,RA:1,Z:1,RCODE:4;
 	uint16_t QDCOUNT;
 	uint16_t ANCOUNT;
 	uint16_t NSCOUNT;
@@ -49,7 +50,7 @@ struct resource_record_t{
 	const void *RDATA;	
 };
 
-struct dns_message{
+struct dns_message_t{
 	header_t Header;
 	question_t *Question;
 	resource_record_t *Answer;
@@ -74,22 +75,46 @@ ntohl(uint32_t net)
 	return ret;
 }
 
-header_t 
-parse_header(const uint8_t *data, const size_t size)
+
+class MessageParser
+{
+	public:
+		MessageParser(std::vector<uint8_t> message);
+		dns_message_t GetDnsMessage();
+	//private:
+		header_t GetHeader();
+		question_t GetQuestion();
+		resource_record_t GetRecrod();
+		std::string GetDomainName(bool couldBeCompressed=true);
+
+	private:
+		size_t m_offset;
+		std::vector<uint8_t> m_raw_data;
+};
+
+//TODO: should I add move semantic here?
+MessageParser::MessageParser(std::vector<uint8_t> message): 
+	m_raw_data(message), m_offset(0)
+{}
+
+header_t
+MessageParser::GetHeader()
 {
 	header_t ret;
-	if (size < sizeof(uint16_t) * 6)
+	if (this->m_raw_data.size() < sizeof(uint16_t) * 6)
 	{
 		std::string errMsg("could not parse dns header");
 		throw std::invalid_argument(errMsg);
 
 	}
+	uint8_t *data = this->m_raw_data.data();
+
 	std::memcpy(&ret.ID, data, sizeof(ret.ID));
 	ret.ID = ntohs(ret.ID);
-	size_t offset = sizeof(ret.ID);
+	this->m_offset =+ sizeof(ret.ID);
 
 	uint16_t flags;
-	std::memcpy(&flags, data + offset , sizeof(flags));
+	std::memcpy(&flags, data + this->m_offset , sizeof(flags));
 	flags = ntohs(flags);
 
 	ret.RCODE = flags & 0xF;
@@ -101,25 +126,132 @@ parse_header(const uint8_t *data, const size_t size)
 	ret.Opcode = (flags >> 11) & 0xF;
 	ret.QR = flags >> 15;
 
-	offset += sizeof(flags);
+	this->m_offset += sizeof(flags);
 
-	std::memcpy(&ret.QDCOUNT, data + offset, sizeof(ret.QDCOUNT));
+	std::memcpy(&ret.QDCOUNT, data + this->m_offset, sizeof(ret.QDCOUNT));
 	ret.QDCOUNT = ntohs(ret.QDCOUNT);
-	offset += sizeof(ret.QDCOUNT);
+	this->m_offset += sizeof(ret.QDCOUNT);
 
-	std::memcpy(&ret.ANCOUNT, data + offset, sizeof(ret.ANCOUNT));
+	std::memcpy(&ret.ANCOUNT, data + this->m_offset, sizeof(ret.ANCOUNT));
 	ret.ANCOUNT = ntohs(ret.ANCOUNT);
-	offset += sizeof(ret.ANCOUNT);
+	this->m_offset += sizeof(ret.ANCOUNT);
 
-	std::memcpy(&ret.NSCOUNT, data + offset, sizeof(ret.NSCOUNT));
+	std::memcpy(&ret.NSCOUNT, data + this->m_offset, sizeof(ret.NSCOUNT));
 	ret.NSCOUNT = ntohs(ret.NSCOUNT);
-	offset += sizeof(ret.NSCOUNT);
+	this->m_offset += sizeof(ret.NSCOUNT);
 
-	std::memcpy(&ret.ARCOUNT, data + offset, sizeof(ret.ARCOUNT));
+	std::memcpy(&ret.ARCOUNT, data + this->m_offset, sizeof(ret.ARCOUNT));
 	ret.ARCOUNT = ntohs(ret.ARCOUNT);
-	offset += sizeof(ret.ARCOUNT);
+	this->m_offset += sizeof(ret.ARCOUNT);
 
 	return ret;
+}
+
+
+std::string
+MessageParser::GetDomainName(bool couldBeCompressed )
+{
+	char domain[ MAX_NAME_LENGTH + 1];	
+	size_t dOffset = 0;
+	domain[dOffset]=0;
+
+
+	size_t lSize;
+	bool   compressed = false;
+	
+	size_t offset = this->m_offset;
+	uint8_t *data = this->m_raw_data.data();
+
+	while ( (lSize = data[offset]) != 0 )
+	{
+		if ( (lSize & 0xC0) == 0xC0)
+		{
+			this->m_offset+=1; 
+			compressed = true;
+			offset = ((data[offset] & 0x3f) << 8 ) | data[offset+1];
+		}
+		else
+		{
+			offset++;
+			//TODO: check domain and raw_data size
+			std::memcpy(domain+dOffset, data+offset, lSize);
+			offset+=lSize;
+			dOffset+=lSize;
+
+			domain[dOffset] = '.'; 
+			dOffset++;
+			domain[dOffset]=0;
+
+			if ( !compressed )
+				this->m_offset=offset;
+		}
+
+	}
+	this->m_offset++;
+	return domain;
+}
+
+question_t
+MessageParser::GetQuestion()
+{
+	question_t ret;
+
+	ret.QNAME = this->GetDomainName();
+	
+	uint8_t *data = this->m_raw_data.data();
+
+	std::memcpy(&ret.QTYPE, data + this->m_offset, sizeof(ret.QTYPE));
+	ret.QTYPE = ntohs(ret.QTYPE);
+	this->m_offset += sizeof(ret.QTYPE);
+
+
+	std::memcpy(&ret.QCLASS, data + this->m_offset, sizeof(ret.QCLASS));
+	ret.QCLASS = ntohs(ret.QCLASS);
+	this->m_offset += sizeof(ret.QCLASS);
+
+	return ret;
+}
+
+resource_record_t
+MessageParser::GetRecrod()
+{
+	resource_record_t ret;
+	/*
+	std::string NAME;
+	uint16_t TYPE;
+	uint16_t CLASS;
+	uint32_t TTL;
+	uint16_t RDLENGTH;
+	void *RDATA;	
+	*/
+	ret.NAME = this->GetDomainName();
+	//dOffset = parse_name(domain, sizeof(domain), buff, offset, size); //TODO: see parse_question
+
+	uint8_t *data = this->m_raw_data.data();	
+	size_t &offset = this->m_offset;
+
+	std::memcpy(&ret.TYPE, data + offset, sizeof(ret.TYPE));   //TODO: make function.. probably with pointer to member... probably template for i32
+	ret.TYPE = ntohs(ret.TYPE);
+	offset += sizeof(ret.TYPE);
+
+	std::memcpy(&ret.CLASS, data + offset, sizeof(ret.CLASS));
+	ret.CLASS = ntohs(ret.CLASS);
+	offset += sizeof(ret.CLASS);
+
+	std::memcpy(&ret.TTL, data + offset, sizeof(ret.TTL));
+	ret.TTL = ntohl(ret.TTL);  // maybe ntoh() not C-like?
+	offset += sizeof(ret.TTL);
+
+
+	std::memcpy(&ret.RDLENGTH, data + offset, sizeof(ret.RDLENGTH));
+	ret.RDLENGTH = ntohs(ret.RDLENGTH);
+	offset += sizeof(ret.RDLENGTH);
+
+	ret.RDATA = data + offset;
+	offset += ret.RDLENGTH;
+
+	return ret;
+
 }
 
 std::ostream& operator<<(std::ostream& os, header_t h)
@@ -136,81 +268,8 @@ std::ostream& operator<<(std::ostream& os, header_t h)
 };
 
 
-//TODO: reference for dOffset looks ugly 
-size_t
-append_label(char* domain, size_t& dOffset, size_t dSize, const uint8_t *buff, size_t bOffset, size_t bSize, bool couldBeCompressed=true)
-{
-	if ( bOffset >= bSize ) throw std::invalid_argument("label overflow");
-	uint16_t lSize = buff[bOffset];
-	bOffset++;
-	if ( (lSize & 0xc0) == 0xc0 ) 
-	{
-		//compressed label
-		return (lSize << 8) | buff[bOffset]; //TODO: looks like hack
-
-	} else
-	{
-		if ( lSize == 0 ) return lSize;
-		if ( (lSize & 0xc0) != 0 ) throw std::invalid_argument("unknown compression flag");
-		
-		std::memcpy(domain+dOffset, buff+bOffset, lSize);
-		dOffset += lSize;
-		domain[dOffset] = '.'; //FQDN YEAH
-		dOffset++;
-		domain[dOffset]=0;
-		return lSize;
-	}
-}
-
-size_t
-parse_name(char* domain,size_t dSize, const uint8_t *buff, size_t bOffset, size_t bSize, bool couldBeCompressed=true)
-{
-	size_t dOffset = 0;
-	domain[dOffset]=0;
-	size_t nextFiledOffset = bOffset;
-	size_t lSize;
-	bool   compressed = false;
-	while ( (lSize = append_label(domain, dOffset, dSize, buff, bOffset, bSize, couldBeCompressed)) != 0) 
-	{
-		if ( (lSize & 0xc000) == 0xc000 ) 
-		{
-			nextFiledOffset +=2;
-			compressed = true;
-			bOffset = lSize & 0x3fff;
-		}
-		else
-		{
-			if (!compressed) nextFiledOffset += lSize + 1;
-			bOffset += lSize + 1;
-		}
-	}
-	return nextFiledOffset + (compressed ? 0 : 1);
-}
-
-question_t
-parse_question(const uint8_t * buff, size_t offset, size_t size, size_t &qOffset)
-{	
-	question_t ret;
-	char domain[ MAX_NAME_LENGTH + 1];	
-	size_t dOffset = 0;
-	domain[dOffset]=0;
-
-	dOffset = parse_name(domain, sizeof(domain), buff, offset, size); //TODO: make it dOffset, not buff offset
-
-	std::memcpy(&ret.QTYPE, buff + dOffset, sizeof(ret.QTYPE));
-	ret.QTYPE = ntohs(ret.QTYPE);
-	dOffset += sizeof(ret.QTYPE);
 
 
-	std::memcpy(&ret.QCLASS, buff + dOffset, sizeof(ret.QCLASS));
-	ret.QCLASS = ntohs(ret.QCLASS);
-	dOffset += sizeof(ret.QCLASS);
-
-	ret.QNAME = domain;
-
-	qOffset = dOffset - offset;
-	return ret;
-}
 
 //TODO: make std::cout do it 
 void
@@ -228,6 +287,7 @@ print_question(const question_t &q)
 resource_record_t
 parse_record(const uint8_t * buff, size_t offset, size_t size, size_t &rOffset)
 {
+	/*
 	resource_record_t ret;
 	/*
 	std::string NAME;
@@ -237,10 +297,11 @@ parse_record(const uint8_t * buff, size_t offset, size_t size, size_t &rOffset)
 	uint16_t RDLENGTH;
 	void *RDATA;	
 	*/
+	/*
 	char domain[ MAX_NAME_LENGTH + 1];	
 	size_t dOffset = 0;
 	domain[dOffset]=0;
-	dOffset = parse_name(domain, sizeof(domain), buff, offset, size); //TODO: see parse_question
+	//dOffset = parse_name(domain, sizeof(domain), buff, offset, size); //TODO: see parse_question
 
 	ret.NAME = domain;
 
@@ -265,6 +326,7 @@ parse_record(const uint8_t * buff, size_t offset, size_t size, size_t &rOffset)
 	dOffset += ret.RDLENGTH;
 
 	return ret;
+	*/
 };
 
 // https://www.cloudflare.com/learning/dns/dns-records/
@@ -344,9 +406,33 @@ int main() {
 			raw_data.insert(raw_data.end(), raw_string_data.begin(), raw_string_data.end());
 		}
 
-		header_t header = parse_header(raw_data.data(),raw_data.size());
-		const size_t headerOffset = 6 * sizeof(int16_t);
+
+
+		MessageParser mp(raw_data);
+
+		header_t header = mp.GetHeader();
 		std::cout << header;
+		if (header.QDCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
+		{
+			std::cout << ";; QUESTION SECTION:"<<std::endl;
+			for (int i=0; i< header.QDCOUNT; i++) 
+			{
+				question_t question = mp.GetQuestion();
+				print_question(question);
+			}
+		}
+		if (header.ANCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
+		{
+			std::cout << ";; ANSWER SECTION:"<<std::endl;
+			for (int i=0; i< header.ANCOUNT; i++) 
+			{
+				resource_record_t record = mp.GetRecrod();
+				print_resourse_record(record);
+			}
+		}
+	
+
+		/*
 		size_t qOffset = 0;
 		if (header.QDCOUNT > 0 )  //TODO: check if RFC forbid QDCOUNT == 0
 		{
@@ -385,9 +471,7 @@ int main() {
 				print_resourse_record(record);
 			}
 		}
-
-
-
+		*/
 
 	}
 	catch (std::invalid_argument e)
