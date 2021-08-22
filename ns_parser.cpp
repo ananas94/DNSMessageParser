@@ -67,7 +67,7 @@ const std::unordered_map<uint16_t,std::string> statuses = {
 
 struct header_t{
 	uint16_t ID;
- 	//not a real thing. could be usefull if we stuck to big-endianness, platform, compiller and sure about paddings 
+ 	//not a real thing. could be usefull if we stick to big-endianness, platform, compiller and sure about paddings 
 	uint16_t QR:1,Opcode:4,AA:1,TC:1,RD:1,RA:1,Z:1,RCODE:4;
 	uint16_t QDCOUNT;
 	uint16_t ANCOUNT;
@@ -437,8 +437,8 @@ MessageParser::GetResourceRecord()
 }
 
 // https://www.cloudflare.com/learning/dns/dns-records/
-// I guess, it's enough to implement commonly-used subset and print hex for other things...
-// wait... where is AAAA record? (in A record)
+// I guess, it's enough to implement commonly-used subset and print hex for other things... 
+// +AAAA, which is hidden in A.
 std::unique_ptr<RData>
 MessageParser::GetRData(uint16_t type)
 {
@@ -452,10 +452,9 @@ MessageParser::GetRData(uint16_t type)
 
 	void *RDATA = data + offset;
 	
-//https://www.cppstories.com/2018/02/factory-selfregister/
-// probably, not worth it. looks like clang fail to do this
-
-// TODO: enum
+	//TODO: pass this to construcor and let *RData extract required data itself
+	//add factory method from types 
+	//hide MessageParser as internal class
 	if (type == 1)
 	{
 		ret =	new ARData(
