@@ -31,6 +31,7 @@ const std::unordered_map<uint16_t,std::string> types = {
 	{16, "TXT"},
 
 	{28, "AAAA"},
+	{33, "SRV"},
 
 	{252, "AXFR"},   //QTYPES
 	{253, "MAILB"},
@@ -100,7 +101,8 @@ struct dns_message_t{
 
 
 
-//could be linux/windows C-functions, but platform is unspecified, so make own implementations
+// could be linux/windows C-functions, but platform is unspecified in test,
+// so make own implementations
 // TODO: add ifdef
 uint16_t
 ntoh(uint16_t net)
@@ -206,16 +208,32 @@ class AAAARData: public RData
 		}
 };
 
-class CNAMERData: public RData
+class DomainRData: public RData
 {
 	std::string m_domain;
 	public:
-		CNAMERData(std::string domain ): m_domain(domain) {};
+		DomainRData(std::string domain ): m_domain(domain) {};
 		virtual operator std::string() override
 		{
 			return m_domain;
 		}
 };
+class CNAMERData: public DomainRData
+{
+	public:
+		CNAMERData(std::string domain): DomainRData(domain) {};
+};
+class NSRData: public DomainRData
+{
+	public:
+		NSRData(std::string domain): DomainRData(domain) {};
+};
+class PTRRData: public DomainRData
+{
+	public:
+		PTRRData(std::string domain): DomainRData(domain) {};
+};
+
 
 class MXRData: public RData
 {
@@ -239,16 +257,6 @@ class TXTRData: public RData
 	}
 };
 
-class NSRData: public RData
-{
-	std::string m_domain;
-	public:
-		NSRData(std::string domain ): m_domain(domain) {};
-		virtual operator std::string() override
-		{
-			return m_domain;
-		}
-};
 
 class SOARData: public RData
 {
@@ -265,7 +273,8 @@ class SOARData: public RData
 		{}
 		virtual operator std::string() override
 		{
-			return m_mname + " " + m_rname +
+			return m_mname +
+			       	" " + m_rname +
 			       	" " + std::to_string(m_serial) +
 			       	" " + std::to_string(m_refresh) +
 			       	" " + std::to_string(m_retry) + 
@@ -274,6 +283,26 @@ class SOARData: public RData
 		}
 
 
+};
+
+//BTW, why SRV RR fields order is broken everywhere?
+//why TTL class and type are reordered?!
+class SRVRData: public RData
+{
+	uint16_t m_priority;
+	uint16_t m_weight;
+	uint16_t m_port;
+	std::string m_target;
+	public:
+		SRVRData(uint16_t priority, uint16_t weight, uint16_t port, std::string target):
+			m_priority(priority), m_weight(weight), m_port(port), m_target(target) {}
+		virtual operator std::string() override
+		{
+			return std::to_string(m_priority) +
+			       	" " + std::to_string(m_weight) +
+			       	" " + std::to_string(m_port) +
+			       	" " + m_target;
+		}
 };
 
 
@@ -347,7 +376,7 @@ MessageParser::GetDomainName(bool couldBeCompressed)
 	{
 		if ( (lSize & 0xC0) == 0xC0)
 		{
-			if (!couldBeCompressed) throw std::invalid_argument("it shouldn't be compressed"); // once kubernetes send srv with compression...
+			if (!couldBeCompressed) throw std::invalid_argument("it shouldn't be compressed"); // once kubernetes send srv with compression... thanks rfc-2782
 			if (!compressed )
 				this->m_offset+=1; 
 			compressed = true;
@@ -363,7 +392,6 @@ MessageParser::GetDomainName(bool couldBeCompressed)
 			if ( offset + lSize > this->m_raw_data.size() ) throw std::invalid_argument("out of bound");
 			if (dOffset + lSize + 2 > MAX_NAME_LENGTH )  throw std::invalid_argument("too long domain name");
 
-			//TODO: check domain and raw_data size
 			std::memcpy(domain+dOffset, data+offset, lSize);
 			offset+=lSize;
 			dOffset+=lSize;
@@ -480,11 +508,24 @@ MessageParser::GetRData(uint16_t type)
 		ret = new TXTRData( std::string((const char*)RDATA,RDLENGTH) );
 		offset += RDLENGTH;
 	} 
+	else if (type == 12)
+	{
+		std::string cname = this->GetDomainName();       
+		ret = new PTRRData(cname);
+	}
 	else if (type == 2)
 	{
 		std::string cname = this->GetDomainName();       
 		ret = new NSRData(cname);
 		//should i check rdlength eq to offset from this record?
+	}
+	else if (type == 33)
+	{
+		uint16_t priority  = this->Get<uint16_t>();
+		uint16_t weight    = this->Get<uint16_t>();
+		uint16_t port      = this->Get<uint16_t>();
+		std::string target = this->GetDomainName(false);       
+		ret = new SRVRData(priority, weight, port, target);
 	}
 	else
 	{
@@ -500,7 +541,6 @@ MessageParser::GetRData(uint16_t type)
 
 
 
-//TODO: move raw_data ownership to dns_message
 dns_message_t
 MessageParser::GetDnsMessage()
 {
@@ -530,8 +570,6 @@ MessageParser::GetDnsMessage()
 	return ret;
 }
 
-//------------------------------------------------
-// output methods
 
 std::ostream& operator<<(std::ostream& os, header_t h)
 {
@@ -656,11 +694,6 @@ std::ostream& operator<<(std::ostream& os, const dns_message_t& d)
 }
 
 
-
-
-
-//-------------------------------------------------------------------------------
-// functions to handle input
 
 uint8_t parse_raw(const char *buf)
 {
