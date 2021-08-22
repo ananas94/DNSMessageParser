@@ -620,7 +620,7 @@ std::ostream& operator<<(std::ostream& os, header_t h)
 
     os << ";; ->>HEADER<<- opcode: " << opcode << "; status: " << status << "; id: " << h.ID << std::endl;
     os << ";; Flags:" << flags;
-    os << "; QUERY " << h.QDCOUNT << "; ANSWER " << h.ANCOUNT << "; AUTHORITY " << h.NSCOUNT << "; ADDITIONAL " << h.ARCOUNT;
+    os << "; QUERY: " << h.QDCOUNT << "; ANSWER: " << h.ANCOUNT << "; AUTHORITY: " << h.NSCOUNT << "; ADDITIONAL: " << h.ARCOUNT;
     return os;
 };
 
@@ -681,7 +681,7 @@ example.com.		76391	IN	A	93.184.216.34
 
 std::ostream& operator<<(std::ostream& os, const dns_message_t& d)
 {
-    os << d.Header << std::endl;
+    os << d.Header << std::endl << std::endl;
     if (d.Question.size()) {
         os << ";; QUESTION SECTION:";
         for (const auto& it : d.Question)
@@ -689,6 +689,7 @@ std::ostream& operator<<(std::ostream& os, const dns_message_t& d)
                << it;
     }
     if (d.Answer.size()) {
+        std::cout << std::endl;
         std::cout << std::endl
                   << ";; ANSWER SECTION:";
         for (const auto& it : d.Answer)
@@ -696,6 +697,7 @@ std::ostream& operator<<(std::ostream& os, const dns_message_t& d)
                << it;
     }
     if (d.Authority.size()) {
+        std::cout << std::endl;
         std::cout << std::endl
                   << ";; AUTHORATIVE NAMESERVERS SECTION:";
         for (const auto& it : d.Authority)
@@ -703,6 +705,7 @@ std::ostream& operator<<(std::ostream& os, const dns_message_t& d)
                << it;
     }
     if (d.Additional.size()) {
+        std::cout << std::endl;
         std::cout << std::endl
                   << ";; ADDITIONAL RECORDS SECTION:";
         for (const auto& it : d.Additional)
