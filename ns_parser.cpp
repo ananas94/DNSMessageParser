@@ -13,6 +13,7 @@
 const size_t UDP_SIZE_LIMIT = 512;
 const size_t MAX_NAME_LENGTH = 255;
 
+//All maps could be replaced by std::array
 const std::unordered_map<uint16_t, std::string> types = {
     { 1, "A" },
     { 2, "NS" },
@@ -181,6 +182,8 @@ public:
         return new GenericRData(mp, RDLENGTH);
     }
 
+    // on hot path std::string should be replaced with type-id and map to std::array
+    // not a problem for one time parser
     static std::unordered_map<std::string, RDataBuilder>& GetBuilders()
     {
         // static class member wouldn't work due some  static initialization order fiasco with clang
