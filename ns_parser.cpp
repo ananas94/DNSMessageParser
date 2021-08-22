@@ -182,7 +182,7 @@ public:
         return new GenericRData(mp, RDLENGTH);
     }
 
-    // on hot path std::string should be replaced with type-id and map to std::array
+    // on hot path std::string should be replaced with type as index of std::array<RDataBuilder,MAX_TYPE>
     // not a problem for one time parser
     static std::unordered_map<std::string, RDataBuilder>& GetBuilders()
     {
@@ -681,7 +681,8 @@ example.com.		76391	IN	A	93.184.216.34
 
 std::ostream& operator<<(std::ostream& os, const dns_message_t& d)
 {
-    os << d.Header << std::endl << std::endl;
+    os << d.Header << std::endl
+       << std::endl;
     if (d.Question.size()) {
         os << ";; QUESTION SECTION:";
         for (const auto& it : d.Question)
