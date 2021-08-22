@@ -153,7 +153,7 @@ class GenericRData: public RData
 		virtual operator std::string()
 		{
 			std::stringstream ss;
-			ss << "unknown rdata(" << this->m_data.size() <<") hex: [";
+			ss << "unknown rdata(" << m_data.size() <<") hex: [";
 			ss.setf(std::ios_base::hex, std::ios_base::basefield);
 			ss.setf(std::ios_base::showbase);
 			for (const uint8_t &it : m_data)
@@ -173,13 +173,13 @@ class ARData: public RData
 	public:
 		ARData(std::vector<uint8_t> &&data): m_data(data) 
 		{
-			if ( this->m_data.size() != 4 ) throw std::invalid_argument("wrong rdata size for A record");
+			if ( m_data.size() != 4 ) throw std::invalid_argument("wrong rdata size for A record");
 		}
 		virtual operator std::string() override
 		{
 			std::stringstream ss;
-			for (size_t i=0; i < this->m_data.size(); i++)
-				ss << (int) (this->m_data)[i] <<( (i!=this->m_data.size()-1) ? "." : "");
+			for (size_t i=0; i < m_data.size(); i++)
+				ss << (int) (m_data)[i] <<( (i!=m_data.size()-1) ? "." : "");
 			return ss.str();
 		}
 };
@@ -190,7 +190,7 @@ class AAAARData: public RData
 	public:
 		AAAARData(std::vector<uint8_t> &&data): m_data(data) 
 		{
-			if ( this->m_data.size() != 16 )  throw std::invalid_argument("wrong rdata size for AAAA record");
+			if ( m_data.size() != 16 )  throw std::invalid_argument("wrong rdata size for AAAA record");
 		};
 		virtual operator std::string() override
 		{
@@ -198,10 +198,10 @@ class AAAARData: public RData
 
 			ss.setf(std::ios_base::hex, std::ios_base::basefield);
 			// could be improved with replacing zeros with :: and remove leading zeros...
-			for (size_t i=0; i <  this->m_data.size(); i+=2)
-				ss << std::setw(2) << std::setfill('0') << (int) (this->m_data)[i] 
-				   << std::setw(2) << std::setfill('0') << (int) (this->m_data)[i+1]
-			   	   <<( (i!=this->m_data.size()  -2) ? ":" : "");
+			for (size_t i=0; i <  m_data.size(); i+=2)
+				ss << std::setw(2) << std::setfill('0') << (int) (m_data)[i] 
+				   << std::setw(2) << std::setfill('0') << (int) (m_data)[i+1]
+			   	   <<( (i!=m_data.size()  -2) ? ":" : "");
 
 			ss.unsetf(std::ios_base::hex);
 			return ss.str();
@@ -315,9 +315,9 @@ template<typename T>
 T MessageParser::Get()
 {
 	T ret;
-	if ( this->m_offset + sizeof(ret) > this->m_raw_data.size() ) throw std::invalid_argument("out of bound");
-	std::memcpy(&ret, this->m_raw_data.data() + this->m_offset, sizeof(ret));
-	this->m_offset += sizeof(ret);
+	if ( m_offset + sizeof(ret) > m_raw_data.size() ) throw std::invalid_argument("out of bound");
+	std::memcpy(&ret, m_raw_data.data() + m_offset, sizeof(ret));
+	m_offset += sizeof(ret);
 	ret= ntoh(ret);
 	return ret;
 }
@@ -327,18 +327,18 @@ header_t
 MessageParser::GetHeader()
 {
 	header_t ret;
-	if (this->m_raw_data.size() < sizeof(uint16_t) * 6)
+	if (m_raw_data.size() < sizeof(uint16_t) * 6)
 	{
 		std::string errMsg("could not parse dns header");
 		throw std::invalid_argument(errMsg);
 
 	}
-	uint8_t *data = this->m_raw_data.data();
+	uint8_t *data = m_raw_data.data();
 
-	ret.ID = this->Get<uint16_t>();
+	ret.ID = Get<uint16_t>();
 
 
-	uint16_t flags =this->Get<uint16_t>();
+	uint16_t flags =Get<uint16_t>();
 
 	ret.RCODE = flags & 0xF;
 	ret.Z = (flags >> 4) & 0x111;
@@ -350,10 +350,10 @@ MessageParser::GetHeader()
 	ret.QR = flags >> 15;
 
 
-	ret.QDCOUNT =this->Get<uint16_t>();
-	ret.ANCOUNT =this->Get<uint16_t>();
-	ret.NSCOUNT =this->Get<uint16_t>();
-	ret.ARCOUNT =this->Get<uint16_t>();
+	ret.QDCOUNT =Get<uint16_t>();
+	ret.ANCOUNT =Get<uint16_t>();
+	ret.NSCOUNT =Get<uint16_t>();
+	ret.ARCOUNT =Get<uint16_t>();
 
 	return ret;
 }
@@ -369,27 +369,27 @@ MessageParser::GetDomainName(bool couldBeCompressed)
 	size_t lSize;
 	bool   compressed = false;
 	
-	size_t offset =  this->m_offset;
-	uint8_t *data = this->m_raw_data.data();
+	size_t offset =  m_offset;
+	uint8_t *data = m_raw_data.data();
 
-	while ( (offset<this->m_raw_data.size()) && ( (lSize = data[offset]) != 0 ))
+	while ( (offset<m_raw_data.size()) && ( (lSize = data[offset]) != 0 ))
 	{
 		if ( (lSize & 0xC0) == 0xC0)
 		{
-			if (!couldBeCompressed) throw std::invalid_argument("it shouldn't be compressed"); // once kubernetes send srv with compression... thanks rfc-2782
+			if (!couldBeCompressed) throw std::invalid_argument("it shouldn't be compressed"); // once kubernetes send srv with target compression... rfc-2782
 			if (!compressed )
-				this->m_offset+=1; 
+				m_offset+=1; 
 			compressed = true;
-			if (offset+1 >= this->m_raw_data.size()) 
+			if (offset+1 >= m_raw_data.size()) 
 				throw std::invalid_argument("out of bound");
 			offset = ((data[offset] & 0x3f) << 8 ) | data[offset+1];
-			if (offset >= this->m_raw_data.size()) 
+			if (offset >= m_raw_data.size()) 
 				throw std::invalid_argument("out of bound");
 		}
 		else
 		{
 			offset++;
-			if ( offset + lSize > this->m_raw_data.size() ) throw std::invalid_argument("out of bound");
+			if ( offset + lSize > m_raw_data.size() ) throw std::invalid_argument("out of bound");
 			if (dOffset + lSize + 2 > MAX_NAME_LENGTH )  throw std::invalid_argument("too long domain name");
 
 			std::memcpy(domain+dOffset, data+offset, lSize);
@@ -401,11 +401,11 @@ MessageParser::GetDomainName(bool couldBeCompressed)
 			domain[dOffset]=0;
 
 			if ( !compressed )
-				this->m_offset=offset;
+				m_offset=offset;
 		}
 
 	}
-	this->m_offset++;
+	m_offset++;
 	return domain;
 }
 
@@ -414,9 +414,9 @@ MessageParser::GetQuestion()
 {
 	question_t ret;
 
-	ret.QNAME  = this->GetDomainName();
-	ret.QTYPE  = this->Get<uint16_t>();
-	ret.QCLASS = this->Get<uint16_t>();
+	ret.QNAME  = GetDomainName();
+	ret.QTYPE  = Get<uint16_t>();
+	ret.QCLASS = Get<uint16_t>();
 
 	return ret;
 }
@@ -425,13 +425,13 @@ resource_record_t
 MessageParser::GetResourceRecord()
 {
 	resource_record_t ret;
-	ret.NAME = this->GetDomainName();
+	ret.NAME = GetDomainName();
 
-	ret.TYPE  = this->Get<uint16_t>();
-	ret.CLASS = this->Get<uint16_t>();
-	ret.TTL   = this->Get<uint32_t>();
+	ret.TYPE  = Get<uint16_t>();
+	ret.CLASS = Get<uint16_t>();
+	ret.TTL   = Get<uint32_t>();
 
-	ret.RDATA = this->GetRData(ret.TYPE);
+	ret.RDATA = GetRData(ret.TYPE);
 
 	return ret;
 }
@@ -444,11 +444,11 @@ MessageParser::GetRData(uint16_t type)
 {
 	RData *ret;
 
-	uint8_t *data = this->m_raw_data.data();	
-	size_t &offset = this->m_offset;
+	uint8_t *data = m_raw_data.data();	
+	size_t &offset = m_offset;
 
-	uint16_t RDLENGTH = this->Get<uint16_t>();
-	if ( offset + RDLENGTH > this->m_raw_data.size() ) throw std::invalid_argument("out of bound");
+	uint16_t RDLENGTH = Get<uint16_t>();
+	if ( offset + RDLENGTH > m_raw_data.size() ) throw std::invalid_argument("out of bound");
 
 	void *RDATA = data + offset;
 	
@@ -460,8 +460,8 @@ MessageParser::GetRData(uint16_t type)
 	{
 		ret =	new ARData(
 			       	std::vector<uint8_t>(
-					this->m_raw_data.begin() + this->m_offset,
-				      	this->m_raw_data.begin() + this->m_offset + RDLENGTH )
+					m_raw_data.begin() + m_offset,
+				      	m_raw_data.begin() + m_offset + RDLENGTH )
 			);
 		offset += RDLENGTH;
 	}
@@ -469,26 +469,26 @@ MessageParser::GetRData(uint16_t type)
 	{
 		ret =	new AAAARData(
 			       	std::vector<uint8_t>(
-					this->m_raw_data.begin() + this->m_offset,
-				      	this->m_raw_data.begin() + this->m_offset + RDLENGTH )
+					m_raw_data.begin() + m_offset,
+				      	m_raw_data.begin() + m_offset + RDLENGTH )
 			);
 		offset += RDLENGTH;
 	}
 	else if (type == 5)
 	{
-		std::string cname = this->GetDomainName();       
+		std::string cname = GetDomainName();       
 		ret = new CNAMERData(cname);
 		//should i check rdlength eq to offset from this record?
 	}
 	else if (type == 6)
 	{
-		std::string mname = this->GetDomainName();
-		std::string rname = this->GetDomainName();
-		uint32_t serial   = this->Get<uint32_t>();
- 		uint32_t refresh    = this->Get<uint32_t>();
-	       	uint32_t retry   = this->Get<uint32_t>();
- 		uint32_t expire   = this->Get<uint32_t>();
- 		uint32_t minimum   = this->Get<uint32_t>();
+		std::string mname = GetDomainName();
+		std::string rname = GetDomainName();
+		uint32_t serial   = Get<uint32_t>();
+ 		uint32_t refresh    = Get<uint32_t>();
+	       	uint32_t retry   = Get<uint32_t>();
+ 		uint32_t expire   = Get<uint32_t>();
+ 		uint32_t minimum   = Get<uint32_t>();
   
 		ret =	new SOARData(
 				mname, rname, serial, refresh, retry, expire, minimum  
@@ -498,8 +498,8 @@ MessageParser::GetRData(uint16_t type)
 	}
 	else if (type == 15)
 	{
-		uint16_t PREFERENCE = this->Get<uint16_t>();
-		std::string EXCHANGE = this->GetDomainName();       
+		uint16_t PREFERENCE = Get<uint16_t>();
+		std::string EXCHANGE = GetDomainName();       
 		ret = new MXRData(EXCHANGE, PREFERENCE);
 		//should i check rdlength eq to offset from this record?
 	}
@@ -510,29 +510,29 @@ MessageParser::GetRData(uint16_t type)
 	} 
 	else if (type == 12)
 	{
-		std::string cname = this->GetDomainName();       
+		std::string cname = GetDomainName();       
 		ret = new PTRRData(cname);
 	}
 	else if (type == 2)
 	{
-		std::string cname = this->GetDomainName();       
+		std::string cname = GetDomainName();       
 		ret = new NSRData(cname);
 		//should i check rdlength eq to offset from this record?
 	}
 	else if (type == 33)
 	{
-		uint16_t priority  = this->Get<uint16_t>();
-		uint16_t weight    = this->Get<uint16_t>();
-		uint16_t port      = this->Get<uint16_t>();
-		std::string target = this->GetDomainName(false);       
+		uint16_t priority  = Get<uint16_t>();
+		uint16_t weight    = Get<uint16_t>();
+		uint16_t port      = Get<uint16_t>();
+		std::string target = GetDomainName(false);       
 		ret = new SRVRData(priority, weight, port, target);
 	}
 	else
 	{
 		ret =	new GenericRData(
 			       	std::vector<uint8_t>(
-					this->m_raw_data.begin() + this->m_offset,
-				      	this->m_raw_data.begin() + this->m_offset + RDLENGTH )
+					m_raw_data.begin() + m_offset,
+				      	m_raw_data.begin() + m_offset + RDLENGTH )
 			);
 		offset += RDLENGTH;
 	}
@@ -545,27 +545,27 @@ dns_message_t
 MessageParser::GetDnsMessage()
 {
 	dns_message_t ret;
-	ret.Header = this->GetHeader();
+	ret.Header = GetHeader();
 	if (ret.Header.QDCOUNT > 0 )  
 	{
 		for (int i=0; i< ret.Header.QDCOUNT; i++) 
-			ret.Question.push_back( this->GetQuestion() );
+			ret.Question.push_back( GetQuestion() );
 	}
 	if (ret.Header.ANCOUNT > 0 )  
 	{
 		for (int i=0; i< ret.Header.ANCOUNT; i++) 
-			ret.Answer.push_back( this->GetResourceRecord() ) ;
+			ret.Answer.push_back( GetResourceRecord() ) ;
 	}
 	
 	if (ret.Header.NSCOUNT > 0 )  
 	{
 		for (int i=0; i< ret.Header.NSCOUNT; i++) 
-			ret.Authority.push_back( this->GetResourceRecord()) ;
+			ret.Authority.push_back( GetResourceRecord()) ;
 	}
 	if (ret.Header.ARCOUNT > 0 )  
 	{
 		for (int i=0; i< ret.Header.ARCOUNT; i++) 
-			ret.Additional.push_back( this->GetResourceRecord()) ;
+			ret.Additional.push_back( GetResourceRecord()) ;
 	}
 	return ret;
 }
