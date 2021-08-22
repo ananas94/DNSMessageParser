@@ -5,6 +5,7 @@
 #include <sstream>
 #include <iostream>
 #include <unordered_map>
+#include <map>
 #include <cstdint>
 #include <memory>
 #include <iomanip>
@@ -81,6 +82,7 @@ struct question_t{
 	uint16_t QCLASS;
 };
 
+
 class RData;
 struct resource_record_t{
 	std::string NAME;
@@ -100,10 +102,12 @@ struct dns_message_t{
 
 
 
-
-// could be linux/windows C-functions, but platform is unspecified in test,
+// could be linux/windows C-functions, but platform is unspecified in task,
 // so make own implementations
-// TODO: add ifdef
+
+// depends on endianness, so there should be some IFDEF/constexpr
+// but there is no compiler-agnostic way to detect byte order
+// so stuck wiht hackerrank's linux on x86  >_<
 uint16_t
 ntoh(uint16_t net)
 {
@@ -127,7 +131,7 @@ class MessageParser
 		header_t GetHeader();
 		question_t GetQuestion();
 		resource_record_t GetResourceRecord();
-		std::unique_ptr<RData> GetrData(uint16_t type);
+		std::unique_ptr<RData> GetRData(uint16_t type);
 		std::string GetDomainName(bool couldBeCompressed=true);
 		std::vector<uint8_t> GetRawData(size_t length);
 		template<typename T> T Get();
@@ -170,16 +174,54 @@ class GenericRData: public RData
 		}
 };
 
-
-class ARData: public RData
+typedef  RData* (*RDataBuilder)(MessageParser&,size_t);
+class RDataFactory
 {
-	std::vector<uint8_t> m_data;
 	public:
+	static bool Register(std::string name,RDataBuilder builder)
+	{
+		RDataFactory::GetBuilders()[name] = builder;
+		return true;
+	}
+	static RData* BuildRData(std::string name, MessageParser &mp, size_t RDLENGTH)
+	{
+		if ( RDataFactory::GetBuilders().find(name.c_str()) != RDataFactory::GetBuilders().end() )	
+			return RDataFactory::GetBuilders()[name.c_str()](mp,RDLENGTH);
+		return new GenericRData(mp,RDLENGTH);
+	}
+
+	static std::unordered_map<std::string, RDataBuilder>& GetBuilders()
+	{
+		// static class member wouldn't work due some  static initialization order fiasco with clang
+		static std::unordered_map<std::string, RDataBuilder> builders;
+		return builders;
+	}
+};
+
+template <typename T>
+class CRTPAutoRegistrator
+{
+	virtual void DontOptimizeMyStatic() { std::cout << CRTPAutoRegistrator<T>::registrator; }
+	static bool registrator;
+};
+template <typename T> 
+bool CRTPAutoRegistrator<T>::registrator = RDataFactory::Register(T::GetDataType(), T::Builder);
+
+
+
+
+class ARData: public RData, CRTPAutoRegistrator<ARData>
+{
+		std::vector<uint8_t> m_data;
 		ARData(MessageParser &mp, size_t RDLENGTH)
 		{
 			if ( RDLENGTH != 4 ) throw std::invalid_argument("wrong rdata size for A record");
 			m_data = mp.GetRawData(RDLENGTH);
 		}
+	public:
+		static const std::string GetDataType() { return "A"; };
+		static RData* Builder(MessageParser &mp, size_t RDLENGTH) { return new ARData(mp,RDLENGTH); }
+		
 		virtual operator std::string() override
 		{
 			std::stringstream ss;
@@ -189,15 +231,18 @@ class ARData: public RData
 		}
 };
 
-class AAAARData: public RData
+class AAAARData: public RData, CRTPAutoRegistrator<AAAARData>
 {
-	std::vector<uint8_t> m_data;
-	public:
+		std::vector<uint8_t> m_data;
 		AAAARData(MessageParser &mp, size_t RDLENGTH)
 		{
 			if ( RDLENGTH != 16 )  throw std::invalid_argument("wrong rdata size for AAAA record");
 			m_data = mp.GetRawData(RDLENGTH);
 		};
+
+	public:
+		static const std::string GetDataType() { return "AAAA"; };
+		static RData* Builder(MessageParser &mp, size_t RDLENGTH) { return new AAAARData(mp,RDLENGTH); }
 		virtual operator std::string() override
 		{
 			std::stringstream ss;
@@ -232,28 +277,32 @@ class DomainRData: public RData
 			return m_domain;
 		}
 };
-class CNAMERData: public DomainRData
+
+class CNAMERData: public DomainRData, CRTPAutoRegistrator<CNAMERData>
 {
-	public:
 		CNAMERData(MessageParser &mp, size_t RDLENGTH) : DomainRData(mp,RDLENGTH) {}
-};
-class NSRData: public DomainRData
-{
 	public:
+		static const std::string GetDataType() { return "CNAME"; };
+		static RData* Builder(MessageParser &mp, size_t RDLENGTH) { return new CNAMERData(mp,RDLENGTH); }
+};
+class NSRData: public DomainRData, CRTPAutoRegistrator<NSRData>
+{
 		NSRData(MessageParser &mp, size_t RDLENGTH)  : DomainRData(mp,RDLENGTH) {}
-};
-class PTRRData: public DomainRData
-{
 	public:
+		static const std::string GetDataType() { return "NS"; };
+		static RData* Builder(MessageParser &mp, size_t RDLENGTH) { return new NSRData(mp,RDLENGTH); }
+};
+class PTRRData: public DomainRData, CRTPAutoRegistrator<PTRRData>
+{
 		PTRRData(MessageParser &mp, size_t RDLENGTH)  : DomainRData(mp,RDLENGTH) {}
+	public:
+		static const std::string GetDataType() { return "PTR"; };
+		static RData* Builder(MessageParser &mp, size_t RDLENGTH) { return new PTRRData(mp,RDLENGTH); }
 };
 
 
-class MXRData: public RData
+class MXRData: public RData, CRTPAutoRegistrator<MXRData>
 {
-	uint16_t m_preference;
-	std::string m_exchange;
-	public:
 		MXRData(MessageParser &mp, size_t RDLENGTH) 
 		{
 			size_t offsetBefore = mp.GetCurrentOffset();
@@ -263,39 +312,44 @@ class MXRData: public RData
 
 			size_t offsetAfter  = mp.GetCurrentOffset();
 			if ( offsetAfter - offsetBefore != RDLENGTH ) throw std::invalid_argument("RDATA format error "); 
-		}
+		}	uint16_t m_preference;
+		std::string m_exchange;
+	public:
+		static const std::string GetDataType() { return "MX"; };
+		static RData* Builder(MessageParser &mp, size_t RDLENGTH) { return new MXRData(mp,RDLENGTH); }
+	
 		virtual operator std::string() override
 		{
 			return std::to_string(m_preference) + " " + m_exchange;
 		}
 };
-class TXTRData: public RData
+class TXTRData: public RData, CRTPAutoRegistrator<TXTRData>
 {
-	std::string m_str;
+		std::string m_str;
+		TXTRData(MessageParser &mp, size_t RDLENGTH)
+		{
+			std::vector<uint8_t> raw_data = mp.GetRawData(RDLENGTH);
+			m_str = std::string(raw_data.begin(), raw_data.end());
+		}
 	public:
-	TXTRData(MessageParser &mp, size_t RDLENGTH)
-	{
-		std::vector<uint8_t> raw_data = mp.GetRawData(RDLENGTH);
-		m_str = std::string(raw_data.begin(), raw_data.end());
-
-	}
-	virtual operator std::string() override
-	{
-		return m_str;
-	}
+		static const std::string GetDataType() { return "TXT"; };
+		static RData* Builder(MessageParser &mp, size_t RDLENGTH) { return new TXTRData(mp,RDLENGTH); }
+		virtual operator std::string() override
+		{	
+			return m_str;
+		}
 };
 
 
-class SOARData: public RData
+class SOARData: public RData, CRTPAutoRegistrator<SOARData>
 {
-	std::string m_mname;
-	std::string m_rname;
-	uint32_t m_serial;
-	uint32_t m_refresh;
-	uint32_t m_retry;
-	uint32_t m_expire;
-	uint32_t m_minimum;
-	public:
+		std::string m_mname;
+		std::string m_rname;
+		uint32_t m_serial;
+		uint32_t m_refresh;
+		uint32_t m_retry;
+		uint32_t m_expire;
+		uint32_t m_minimum;
 		SOARData(MessageParser &mp, size_t RDLENGTH)
 		{
 			size_t offsetBefore = mp.GetCurrentOffset();
@@ -310,6 +364,10 @@ class SOARData: public RData
 			size_t offsetAfter  = mp.GetCurrentOffset();
 			if ( offsetAfter - offsetBefore != RDLENGTH ) throw std::invalid_argument("RDATA format error "); 
 		}
+	public:
+		static const std::string GetDataType() { return "SOA"; };
+		static RData* Builder(MessageParser &mp, size_t RDLENGTH) { return new SOARData(mp,RDLENGTH); }
+	
 		virtual operator std::string() override
 		{
 			return m_mname +
@@ -326,13 +384,12 @@ class SOARData: public RData
 
 //BTW, why SRV RR fields order is broken everywhere?
 //why TTL class and type are reordered?!
-class SRVRData: public RData
+class SRVRData: public RData, CRTPAutoRegistrator<SRVRData>
 {
-	uint16_t m_priority;
-	uint16_t m_weight;
-	uint16_t m_port;
-	std::string m_target;
-	public:
+		uint16_t m_priority;
+		uint16_t m_weight;
+		uint16_t m_port;
+		std::string m_target;
 		SRVRData(MessageParser &mp, size_t RDLENGTH)
 		{
 			size_t offsetBefore = mp.GetCurrentOffset();
@@ -346,6 +403,10 @@ class SRVRData: public RData
 			size_t offsetAfter  = mp.GetCurrentOffset();
 			if ( offsetAfter - offsetBefore != RDLENGTH ) throw std::invalid_argument("RDATA format error "); 
 		}
+	public:
+		static const std::string GetDataType() { return "SRV"; };
+		static RData* Builder(MessageParser &mp, size_t RDLENGTH) { return new SRVRData(mp,RDLENGTH); }
+	
 		virtual operator std::string() override
 		{
 			return std::to_string(m_priority) +
@@ -481,7 +542,7 @@ MessageParser::GetResourceRecord()
 	ret.CLASS = Get<uint16_t>();
 	ret.TTL   = Get<uint32_t>();
 
-	ret.RDATA = GetrData(ret.TYPE);
+	ret.RDATA = GetRData(ret.TYPE);
 
 	return ret;
 }
@@ -503,7 +564,7 @@ MessageParser::GetRawData(size_t length)
 // I guess, it's enough to implement commonly-used subset and print hex for other things... 
 // +AAAA, which is hidden in A.
 std::unique_ptr<RData>
-MessageParser::GetrData(uint16_t type)
+MessageParser::GetRData(uint16_t type)
 {
 	RData *ret;
 
@@ -511,56 +572,15 @@ MessageParser::GetrData(uint16_t type)
 	size_t &offset = m_offset;
 
 	uint16_t RDLENGTH = Get<uint16_t>();
-	if ( offset + RDLENGTH > m_raw_data.size() ) throw std::invalid_argument("out of bound");
 
-	void *RDATA = data + offset;
-	
-	//TODO: pass this to construcor and let *RData extract required data itself
-	//add factory method from types 
-	//hide MessageParser as internal class
-	if (type == 1)
-	{
-		ret = new ARData( *this, RDLENGTH );
-	}
-	else if (type == 28)
-	{
-		ret = new AAAARData( *this, RDLENGTH);
-	}
-	else if (type == 5)
-	{
-		ret = new CNAMERData( *this, RDLENGTH);
-	}
-	else if (type == 6)
-	{
-
-		ret = new SOARData( *this, RDLENGTH);
-
-		//should i check rdlength eq to offset from this record?
-	}
-	else if (type == 15)
-	{
-		ret = new MXRData(*this, RDLENGTH);
-	}
-	else if (type == 16) 
-	{
-		ret = new TXTRData(*this, RDLENGTH);
-	} 
-	else if (type == 12)
-	{
-		ret = new PTRRData(*this, RDLENGTH);
-	}
-	else if (type == 2)
-	{
-		ret = new NSRData(*this, RDLENGTH);
-	}
-	else if (type == 33)
-	{
-		ret = new SRVRData(*this, RDLENGTH);
-	}
+	std::string typeName;
+	if ( types.find(type) != types.end() )
+		typeName = types.at(type);
 	else
-	{
-		ret = new GenericRData(*this, RDLENGTH);
-	}
+		typeName ="unknown("+ std::to_string(type)+ ")";
+	
+	ret = RDataFactory::BuildRData(typeName, *this, RDLENGTH);
+
 	return std::unique_ptr<RData>(ret);
 }
 
