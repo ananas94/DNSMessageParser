@@ -86,7 +86,6 @@ struct resource_record_t{
 	uint16_t TYPE;
 	uint16_t CLASS;
 	uint32_t TTL;
-	//TODO: memory safety unique_ptr and vector?? destructor?
 	std::unique_ptr<RData> RDATA;
 };
 
@@ -101,75 +100,7 @@ struct dns_message_t{
 
 
 
-class RData
-{
-	protected:
-		const void* data;
-		const size_t size;
-	public:
-		RData(const void* d, size_t s): data(d), size(s) {};
-		virtual operator std::string()
-		{
-			std::stringstream ss;
-			ss << "unknown rdata(" << this->size <<") hex: [";
-			ss.setf(std::ios_base::hex, std::ios_base::basefield);
-			ss.setf(std::ios_base::showbase);
-			for (size_t i=0; i< size; i++)
-				ss << (int) ((const uint8_t*)data)[i] << " ";
-
-			ss.unsetf(std::ios_base::hex);
-			ss<< "]";
-
-			return ss.str();
-		}
-		virtual ~RData() =default;
-};
-
-
-
-class ARData: public RData
-{
-	public:
-		ARData(const void* d, size_t s): RData(d,s)
-		{
-			if ( s != 4 ) throw std::invalid_argument("wrong rdata size for A record");
-		}
-		virtual operator std::string() override
-		{
-			std::stringstream ss;
-			for (size_t i=0; i < size; i++)
-				ss << (int) ((const uint8_t*)data)[i] <<( (i!=size-1) ? "." : "");
-			return ss.str();
-		}
-};
-
-class AAAARData: public RData
-{
-	public:
-		AAAARData(const void* d, size_t s): RData(d,s)
-		{
-			if ( s != 16 ) throw std::invalid_argument("wrong rdata size for AAAA record");
-		};
-		virtual operator std::string() override
-		{
-			std::stringstream ss;
-
-			ss.setf(std::ios_base::hex, std::ios_base::basefield);
-
-			for (size_t i=0; i < size; i+=2)
-				ss << std::setw(2) << std::setfill('0') << (int) ((const uint8_t*)data)[i] 
-				   << std::setw(2) << std::setfill('0') << (int) ((const uint8_t*)data)[i+1]
-			   	   <<( (i!=size-2) ? ":" : "");
-
-			ss.unsetf(std::ios_base::hex);
-			return ss.str();
-		}
-};
-
-
-
-
-//could be linux/windows function, but platform is unspecified, so make own implementations
+//could be linux/windows C-functions, but platform is unspecified, so make own implementations
 // TODO: add ifdef
 uint16_t
 ntoh(uint16_t net)
@@ -189,7 +120,7 @@ ntoh(uint32_t net)
 class MessageParser
 {
 	public:
-		MessageParser(std::vector<uint8_t> message);
+		MessageParser(std::vector<uint8_t>&& message);
 		dns_message_t GetDnsMessage();
 	private:
 		header_t GetHeader();
@@ -197,17 +128,124 @@ class MessageParser
 		resource_record_t GetResourceRecord();
 		std::unique_ptr<RData> GetRData(uint16_t type);
 		std::string GetDomainName(bool couldBeCompressed=true);
-
+		template<typename T> T Get();
 	private:
 		size_t m_offset;
 		std::vector<uint8_t> m_raw_data;
 };
 
+class RData
+{
+	public:
+	virtual operator std::string() = 0;
+	virtual ~RData() =default;
+};
+
+class GenericRData: public RData
+{
+	protected:
+		const void* data;
+		const size_t size;
+	public:
+		GenericRData(const void* d, size_t s): data(d), size(s) {};
+		virtual operator std::string()
+		{
+			std::stringstream ss;
+			ss << "unknown rdata(" << this->size <<") hex: [";
+			ss.setf(std::ios_base::hex, std::ios_base::basefield);
+			ss.setf(std::ios_base::showbase);
+			for (size_t i=0; i< size; i++)
+				ss << (int) ((const uint8_t*)data)[i] << " ";
+
+			ss.unsetf(std::ios_base::hex);
+			ss<< "]";
+
+			return ss.str();
+		}
+		virtual ~GenericRData() =default;
+};
+
+
+class ARData: public GenericRData
+{
+	public:
+		ARData(const void* d, size_t s): GenericRData(d,s)
+		{
+			if ( s != 4 ) throw std::invalid_argument("wrong rdata size for A record");
+		}
+		virtual operator std::string() override
+		{
+			std::stringstream ss;
+			for (size_t i=0; i < size; i++)
+				ss << (int) ((const uint8_t*)data)[i] <<( (i!=size-1) ? "." : "");
+			return ss.str();
+		}
+};
+
+class AAAARData: public GenericRData
+{
+	public:
+		AAAARData(const void* d, size_t s): GenericRData(d,s)
+		{
+			if ( s != 16 ) throw std::invalid_argument("wrong rdata size for AAAA record");
+		};
+		virtual operator std::string() override
+		{
+			std::stringstream ss;
+
+			ss.setf(std::ios_base::hex, std::ios_base::basefield);
+			// could be improved with replacing zeros with :: and remove leading zeros...
+			for (size_t i=0; i < size; i+=2)
+				ss << std::setw(2) << std::setfill('0') << (int) ((const uint8_t*)data)[i] 
+				   << std::setw(2) << std::setfill('0') << (int) ((const uint8_t*)data)[i+1]
+			   	   <<( (i!=size-2) ? ":" : "");
+
+			ss.unsetf(std::ios_base::hex);
+			return ss.str();
+		}
+};
+
+
 class CNAMERData: public RData
 {
 	std::string m_domain;
 	public:
-		CNAMERData(const void* d, size_t s, std::string domain ): RData(d,s), m_domain(domain) {};
+		CNAMERData(std::string domain ): m_domain(domain) {};
+		virtual operator std::string() override
+		{
+			return m_domain;
+		}
+};
+
+class MXRData: public RData
+{
+	std::string m_domain;
+	int16_t m_preference;
+	public:
+		MXRData ( std::string domain, int16_t preference) :  m_domain(domain), m_preference(preference) {}
+		virtual operator std::string() override
+		{
+			return std::to_string(m_preference) + m_domain;
+		}
+};
+
+class TXTRData: public GenericRData
+{
+	public:
+	TXTRData(const void* d, size_t s): GenericRData(d,s) {}
+	virtual operator std::string() override
+	{
+		std::string ret( (const char*)data, size);
+		return ret;
+	}
+};
+
+
+class NSRData: public RData
+{
+	std::string m_domain;
+	public:
+		NSRData(const void* d, size_t s, std::string domain ): m_domain(domain) {};
 		virtual operator std::string() override
 		{
 			return m_domain;
@@ -215,12 +253,22 @@ class CNAMERData: public RData
 };
 
 
-
-
-
-MessageParser::MessageParser(std::vector<uint8_t> message): 
+MessageParser::MessageParser(std::vector<uint8_t>&& message): 
 	 m_offset(0), m_raw_data(message)
 {}
+
+
+template<typename T>
+T MessageParser::Get()
+{
+	T ret;
+	if ( this->m_offset + sizeof(ret) > this->m_raw_data.size() ) throw std::invalid_argument("out of bound");
+	std::memcpy(&ret, this->m_raw_data.data() + this->m_offset, sizeof(ret));
+	this->m_offset += sizeof(ret);
+	ret= ntoh(ret);
+	return ret;
+}
+
 
 header_t
 MessageParser::GetHeader()
@@ -234,13 +282,10 @@ MessageParser::GetHeader()
 	}
 	uint8_t *data = this->m_raw_data.data();
 
-	std::memcpy(&ret.ID, data, sizeof(ret.ID));
-	ret.ID = ntoh(ret.ID);
-	this->m_offset += sizeof(ret.ID);
+	ret.ID = this->Get<uint16_t>();
 
-	uint16_t flags;
-	std::memcpy(&flags, data + this->m_offset , sizeof(flags));
-	flags = ntoh(flags);
+
+	uint16_t flags =this->Get<uint16_t>();
 
 	ret.RCODE = flags & 0xF;
 	ret.Z = (flags >> 4) & 0x111;
@@ -251,23 +296,11 @@ MessageParser::GetHeader()
 	ret.Opcode = (flags >> 11) & 0xF;
 	ret.QR = flags >> 15;
 
-	this->m_offset += sizeof(flags);
 
-	std::memcpy(&ret.QDCOUNT, data + this->m_offset, sizeof(ret.QDCOUNT));
-	ret.QDCOUNT = ntoh(ret.QDCOUNT);
-	this->m_offset += sizeof(ret.QDCOUNT);
-
-	std::memcpy(&ret.ANCOUNT, data + this->m_offset, sizeof(ret.ANCOUNT));
-	ret.ANCOUNT = ntoh(ret.ANCOUNT);
-	this->m_offset += sizeof(ret.ANCOUNT);
-
-	std::memcpy(&ret.NSCOUNT, data + this->m_offset, sizeof(ret.NSCOUNT));
-	ret.NSCOUNT = ntoh(ret.NSCOUNT);
-	this->m_offset += sizeof(ret.NSCOUNT);
-
-	std::memcpy(&ret.ARCOUNT, data + this->m_offset, sizeof(ret.ARCOUNT));
-	ret.ARCOUNT = ntoh(ret.ARCOUNT);
-	this->m_offset += sizeof(ret.ARCOUNT);
+	ret.QDCOUNT =this->Get<uint16_t>();
+	ret.ANCOUNT =this->Get<uint16_t>();
+	ret.NSCOUNT =this->Get<uint16_t>();
+	ret.ARCOUNT =this->Get<uint16_t>();
 
 	return ret;
 }
@@ -321,18 +354,9 @@ MessageParser::GetQuestion()
 {
 	question_t ret;
 
-	ret.QNAME = this->GetDomainName();
-	
-	uint8_t *data = this->m_raw_data.data();
-
-	std::memcpy(&ret.QTYPE, data + this->m_offset, sizeof(ret.QTYPE));
-	ret.QTYPE = ntoh(ret.QTYPE);
-	this->m_offset += sizeof(ret.QTYPE);
-
-
-	std::memcpy(&ret.QCLASS, data + this->m_offset, sizeof(ret.QCLASS));
-	ret.QCLASS = ntoh(ret.QCLASS);
-	this->m_offset += sizeof(ret.QCLASS);
+	ret.QNAME  = this->GetDomainName();
+	ret.QTYPE  = this->Get<uint16_t>();
+	ret.QCLASS = this->Get<uint16_t>();
 
 	return ret;
 }
@@ -346,17 +370,10 @@ MessageParser::GetResourceRecord()
 	uint8_t *data = this->m_raw_data.data();	
 	size_t &offset = this->m_offset;
 
-	std::memcpy(&ret.TYPE, data + offset, sizeof(ret.TYPE));   
-	ret.TYPE = ntoh(ret.TYPE);
-	offset += sizeof(ret.TYPE);
-
-	std::memcpy(&ret.CLASS, data + offset, sizeof(ret.CLASS));
-	ret.CLASS = ntoh(ret.CLASS);
-	offset += sizeof(ret.CLASS);
-
-	std::memcpy(&ret.TTL, data + offset, sizeof(ret.TTL));
-	ret.TTL = ntoh(ret.TTL); 
-	offset += sizeof(ret.TTL);
+	//TODO: MessageParser::GetUInt16 GetUInt32 etc and move reading from known RData at all
+	ret.TYPE  = this->Get<uint16_t>();
+	ret.CLASS = this->Get<uint16_t>();
+	ret.TTL   = this->Get<uint32_t>();
 
 	ret.RDATA = this->GetRData(ret.TYPE);
 
@@ -364,12 +381,8 @@ MessageParser::GetResourceRecord()
 }
 
 // https://www.cloudflare.com/learning/dns/dns-records/
-// https://en.wikipedia.org/wiki/List_of_DNS_record_types
 // I guess, it's enough to implement commonly-used subset and print hex for other things...
-// wait... where is AAAA record?
-// for other things add hex printer
-// maybe factory for rdata types?
-//std::unique_ptr<RData>
+// wait... where is AAAA record? (in A record)
 std::unique_ptr<RData>
 MessageParser::GetRData(uint16_t type)
 {
@@ -378,15 +391,13 @@ MessageParser::GetRData(uint16_t type)
 	uint8_t *data = this->m_raw_data.data();	
 	size_t &offset = this->m_offset;
 
-	uint16_t RDLENGTH;
-	std::memcpy(&RDLENGTH, data + offset, sizeof(RDLENGTH));
-	RDLENGTH = ntoh(RDLENGTH);
-	offset += sizeof(RDLENGTH);
-
+	uint16_t RDLENGTH = this->Get<uint16_t>();
 	void *RDATA = data + offset;
 
 //https://www.cppstories.com/2018/02/factory-selfregister/
 // probably, not worth it. looks like clang fail to do this
+
+// TODO: enum
 	if (type == 1)
 	{
 		ret = new ARData(RDATA,RDLENGTH);
@@ -400,11 +411,27 @@ MessageParser::GetRData(uint16_t type)
 	else if (type == 5)
 	{
 		std::string cname = this->GetDomainName();       
-		ret = new CNAMERData(RDATA, RDLENGTH, cname);
+		ret = new CNAMERData(cname);
+	}
+	else if (type == 15)
+	{
+		uint16_t PREFERENCE = this->Get<uint16_t>();
+		std::string EXCHANGE = this->GetDomainName();       
+		ret = new MXRData(EXCHANGE, PREFERENCE);
+	}
+	else if (type == 16) 
+	{
+		ret = new TXTRData(RDATA,RDLENGTH);
+		offset += RDLENGTH;
+	}
+	else if (type == 2)
+	{
+		std::string cname = this->GetDomainName();       
+		ret = new NSRData(RDATA, RDLENGTH, cname);
 	}
 	else
 	{
-		ret =	new RData( RDATA, RDLENGTH);
+		ret =	new GenericRData( RDATA, RDLENGTH);
 		offset += RDLENGTH;
 	}
 	return std::unique_ptr<RData>(ret);
@@ -412,6 +439,7 @@ MessageParser::GetRData(uint16_t type)
 
 
 
+//TODO: move raw_data ownership to dns_message
 dns_message_t
 MessageParser::GetDnsMessage()
 {
@@ -625,8 +653,8 @@ int main() {
 
 			std::cin >> input;
 
-			if ( (input.size() == 1 && input[0] == '\\')
-				     	|| input.size()==0 ) continue; // copy-paste to terminal from hackerrank add empty lines to input, so ignore 0-sized strings
+			if ( (input.size() == 1 && input[0] == '\\') ||
+			     input.size()==0 ) continue; // copy-paste to terminal from hackerrank add empty lines to input, so ignore 0-sized strings
 
 			auto raw_string_data = parse_input_string(input);
 
@@ -634,8 +662,7 @@ int main() {
 		}
 
 
-
-		MessageParser mp(raw_data);
+		MessageParser mp(std::move(raw_data));
 
 		dns_message_t dm = mp.GetDnsMessage();
 		std::cout << dm<< std::endl;
