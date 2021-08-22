@@ -124,13 +124,14 @@ class MessageParser
 	public:
 		MessageParser(std::vector<uint8_t>&& message);
 		dns_message_t GetDnsMessage();
-	private:
 		header_t GetHeader();
 		question_t GetQuestion();
 		resource_record_t GetResourceRecord();
-		std::unique_ptr<RData> GetRData(uint16_t type);
+		std::unique_ptr<RData> GetrData(uint16_t type);
 		std::string GetDomainName(bool couldBeCompressed=true);
+		std::vector<uint8_t> GetRawData(size_t length);
 		template<typename T> T Get();
+		size_t GetCurrentOffset() { return m_offset; };
 	private:
 		size_t m_offset;
 		std::vector<uint8_t> m_raw_data;
@@ -149,7 +150,10 @@ class GenericRData: public RData
 	protected:
 		std::vector<uint8_t> m_data;
 	public:
-		GenericRData(std::vector<uint8_t> &&data): m_data(data) {}
+		GenericRData(MessageParser &mp, size_t RDLENGTH)
+		{
+			m_data = mp.GetRawData(RDLENGTH);
+		}
 		virtual operator std::string()
 		{
 			std::stringstream ss;
@@ -171,9 +175,10 @@ class ARData: public RData
 {
 	std::vector<uint8_t> m_data;
 	public:
-		ARData(std::vector<uint8_t> &&data): m_data(data) 
+		ARData(MessageParser &mp, size_t RDLENGTH)
 		{
-			if ( m_data.size() != 4 ) throw std::invalid_argument("wrong rdata size for A record");
+			if ( RDLENGTH != 4 ) throw std::invalid_argument("wrong rdata size for A record");
+			m_data = mp.GetRawData(RDLENGTH);
 		}
 		virtual operator std::string() override
 		{
@@ -188,9 +193,10 @@ class AAAARData: public RData
 {
 	std::vector<uint8_t> m_data;
 	public:
-		AAAARData(std::vector<uint8_t> &&data): m_data(data) 
+		AAAARData(MessageParser &mp, size_t RDLENGTH)
 		{
-			if ( m_data.size() != 16 )  throw std::invalid_argument("wrong rdata size for AAAA record");
+			if ( RDLENGTH != 16 )  throw std::invalid_argument("wrong rdata size for AAAA record");
+			m_data = mp.GetRawData(RDLENGTH);
 		};
 		virtual operator std::string() override
 		{
@@ -212,7 +218,15 @@ class DomainRData: public RData
 {
 	std::string m_domain;
 	public:
-		DomainRData(std::string domain ): m_domain(domain) {};
+		DomainRData(MessageParser &mp, size_t RDLENGTH)
+		{
+			size_t offsetBefore = mp.GetCurrentOffset();
+
+			m_domain = mp.GetDomainName();       
+			size_t offsetAfter  = mp.GetCurrentOffset();
+
+			if ( offsetAfter - offsetBefore != RDLENGTH ) throw std::invalid_argument("RDLENGTH not equial to domain name");  // RAII-checker wouldn't work - we couldn't throw from destructor
+		}
 		virtual operator std::string() override
 		{
 			return m_domain;
@@ -221,36 +235,50 @@ class DomainRData: public RData
 class CNAMERData: public DomainRData
 {
 	public:
-		CNAMERData(std::string domain): DomainRData(domain) {};
+		CNAMERData(MessageParser &mp, size_t RDLENGTH) : DomainRData(mp,RDLENGTH) {}
 };
 class NSRData: public DomainRData
 {
 	public:
-		NSRData(std::string domain): DomainRData(domain) {};
+		NSRData(MessageParser &mp, size_t RDLENGTH)  : DomainRData(mp,RDLENGTH) {}
 };
 class PTRRData: public DomainRData
 {
 	public:
-		PTRRData(std::string domain): DomainRData(domain) {};
+		PTRRData(MessageParser &mp, size_t RDLENGTH)  : DomainRData(mp,RDLENGTH) {}
 };
 
 
 class MXRData: public RData
 {
-	std::string m_domain;
 	uint16_t m_preference;
+	std::string m_exchange;
 	public:
-		MXRData ( std::string domain, uint16_t preference) :  m_domain(domain), m_preference(preference) {}
+		MXRData(MessageParser &mp, size_t RDLENGTH) 
+		{
+			size_t offsetBefore = mp.GetCurrentOffset();
+
+			m_preference = mp.Get<uint16_t>();
+			m_exchange   = mp.GetDomainName();       
+
+			size_t offsetAfter  = mp.GetCurrentOffset();
+			if ( offsetAfter - offsetBefore != RDLENGTH ) throw std::invalid_argument("RDATA format error "); 
+		}
 		virtual operator std::string() override
 		{
-			return std::to_string(m_preference) + " " + m_domain;
+			return std::to_string(m_preference) + " " + m_exchange;
 		}
 };
 class TXTRData: public RData
 {
 	std::string m_str;
 	public:
-	TXTRData(std::string&& str) : m_str(str) {};
+	TXTRData(MessageParser &mp, size_t RDLENGTH)
+	{
+		std::vector<uint8_t> raw_data = mp.GetRawData(RDLENGTH);
+		m_str = std::string(raw_data.begin(), raw_data.end());
+
+	}
 	virtual operator std::string() override
 	{
 		return m_str;
@@ -268,9 +296,20 @@ class SOARData: public RData
 	uint32_t m_expire;
 	uint32_t m_minimum;
 	public:
-		SOARData(std::string mname, std::string rname, uint32_t serial, uint32_t refresh, uint32_t retry, uint32_t expire, uint32_t minimum  ): 
-			m_mname(mname), m_rname(rname), m_serial(serial), m_refresh(refresh), m_retry(retry), m_expire(expire), m_minimum(minimum)
-		{}
+		SOARData(MessageParser &mp, size_t RDLENGTH)
+		{
+			size_t offsetBefore = mp.GetCurrentOffset();
+			m_mname   = mp.GetDomainName();
+			m_rname   = mp.GetDomainName();
+			m_serial  = mp.Get<uint32_t>();
+	 		m_refresh = mp.Get<uint32_t>();
+		       	m_retry   = mp.Get<uint32_t>();
+	 		m_expire  = mp.Get<uint32_t>();
+	 		m_minimum = mp.Get<uint32_t>();
+
+			size_t offsetAfter  = mp.GetCurrentOffset();
+			if ( offsetAfter - offsetBefore != RDLENGTH ) throw std::invalid_argument("RDATA format error "); 
+		}
 		virtual operator std::string() override
 		{
 			return m_mname +
@@ -294,8 +333,19 @@ class SRVRData: public RData
 	uint16_t m_port;
 	std::string m_target;
 	public:
-		SRVRData(uint16_t priority, uint16_t weight, uint16_t port, std::string target):
-			m_priority(priority), m_weight(weight), m_port(port), m_target(target) {}
+		SRVRData(MessageParser &mp, size_t RDLENGTH)
+		{
+			size_t offsetBefore = mp.GetCurrentOffset();
+			m_priority  = mp.Get<uint16_t>();
+			m_weight    = mp.Get<uint16_t>();
+			m_port      = mp.Get<uint16_t>();
+
+			const bool couldBeCompressed = false;
+			m_target    = mp.GetDomainName(couldBeCompressed);       
+
+			size_t offsetAfter  = mp.GetCurrentOffset();
+			if ( offsetAfter - offsetBefore != RDLENGTH ) throw std::invalid_argument("RDATA format error "); 
+		}
 		virtual operator std::string() override
 		{
 			return std::to_string(m_priority) +
@@ -431,16 +481,29 @@ MessageParser::GetResourceRecord()
 	ret.CLASS = Get<uint16_t>();
 	ret.TTL   = Get<uint32_t>();
 
-	ret.RDATA = GetRData(ret.TYPE);
+	ret.RDATA = GetrData(ret.TYPE);
 
 	return ret;
 }
+
+std::vector<uint8_t>
+MessageParser::GetRawData(size_t length)
+{
+	if ( (m_offset + length) > m_raw_data.size() ) throw std::invalid_argument("out of bound");
+	std::vector<uint8_t> ret(
+				m_raw_data.begin() + m_offset,
+			      	m_raw_data.begin() + m_offset + length );
+
+	m_offset += length;
+	return ret;
+}
+
 
 // https://www.cloudflare.com/learning/dns/dns-records/
 // I guess, it's enough to implement commonly-used subset and print hex for other things... 
 // +AAAA, which is hidden in A.
 std::unique_ptr<RData>
-MessageParser::GetRData(uint16_t type)
+MessageParser::GetrData(uint16_t type)
 {
 	RData *ret;
 
@@ -457,83 +520,46 @@ MessageParser::GetRData(uint16_t type)
 	//hide MessageParser as internal class
 	if (type == 1)
 	{
-		ret =	new ARData(
-			       	std::vector<uint8_t>(
-					m_raw_data.begin() + m_offset,
-				      	m_raw_data.begin() + m_offset + RDLENGTH )
-			);
-		offset += RDLENGTH;
+		ret = new ARData( *this, RDLENGTH );
 	}
 	else if (type == 28)
 	{
-		ret =	new AAAARData(
-			       	std::vector<uint8_t>(
-					m_raw_data.begin() + m_offset,
-				      	m_raw_data.begin() + m_offset + RDLENGTH )
-			);
-		offset += RDLENGTH;
+		ret = new AAAARData( *this, RDLENGTH);
 	}
 	else if (type == 5)
 	{
-		std::string cname = GetDomainName();       
-		ret = new CNAMERData(cname);
-		//should i check rdlength eq to offset from this record?
+		ret = new CNAMERData( *this, RDLENGTH);
 	}
 	else if (type == 6)
 	{
-		std::string mname = GetDomainName();
-		std::string rname = GetDomainName();
-		uint32_t serial   = Get<uint32_t>();
- 		uint32_t refresh    = Get<uint32_t>();
-	       	uint32_t retry   = Get<uint32_t>();
- 		uint32_t expire   = Get<uint32_t>();
- 		uint32_t minimum   = Get<uint32_t>();
-  
-		ret =	new SOARData(
-				mname, rname, serial, refresh, retry, expire, minimum  
-			);
+
+		ret = new SOARData( *this, RDLENGTH);
 
 		//should i check rdlength eq to offset from this record?
 	}
 	else if (type == 15)
 	{
-		uint16_t PREFERENCE = Get<uint16_t>();
-		std::string EXCHANGE = GetDomainName();       
-		ret = new MXRData(EXCHANGE, PREFERENCE);
-		//should i check rdlength eq to offset from this record?
+		ret = new MXRData(*this, RDLENGTH);
 	}
 	else if (type == 16) 
 	{
-		ret = new TXTRData( std::string((const char*)RDATA,RDLENGTH) );
-		offset += RDLENGTH;
+		ret = new TXTRData(*this, RDLENGTH);
 	} 
 	else if (type == 12)
 	{
-		std::string cname = GetDomainName();       
-		ret = new PTRRData(cname);
+		ret = new PTRRData(*this, RDLENGTH);
 	}
 	else if (type == 2)
 	{
-		std::string cname = GetDomainName();       
-		ret = new NSRData(cname);
-		//should i check rdlength eq to offset from this record?
+		ret = new NSRData(*this, RDLENGTH);
 	}
 	else if (type == 33)
 	{
-		uint16_t priority  = Get<uint16_t>();
-		uint16_t weight    = Get<uint16_t>();
-		uint16_t port      = Get<uint16_t>();
-		std::string target = GetDomainName(false);       
-		ret = new SRVRData(priority, weight, port, target);
+		ret = new SRVRData(*this, RDLENGTH);
 	}
 	else
 	{
-		ret =	new GenericRData(
-			       	std::vector<uint8_t>(
-					m_raw_data.begin() + m_offset,
-				      	m_raw_data.begin() + m_offset + RDLENGTH )
-			);
-		offset += RDLENGTH;
+		ret = new GenericRData(*this, RDLENGTH);
 	}
 	return std::unique_ptr<RData>(ret);
 }
