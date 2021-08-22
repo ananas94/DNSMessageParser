@@ -141,53 +141,54 @@ class RData
 	virtual ~RData() =default;
 };
 
+
 class GenericRData: public RData
 {
 	protected:
-		const void* data;
-		const size_t size;
+		std::vector<uint8_t> m_data;
 	public:
-		GenericRData(const void* d, size_t s): data(d), size(s) {};
+		GenericRData(std::vector<uint8_t> &&data): m_data(data) {}
 		virtual operator std::string()
 		{
 			std::stringstream ss;
-			ss << "unknown rdata(" << this->size <<") hex: [";
+			ss << "unknown rdata(" << this->m_data.size() <<") hex: [";
 			ss.setf(std::ios_base::hex, std::ios_base::basefield);
 			ss.setf(std::ios_base::showbase);
-			for (size_t i=0; i< size; i++)
-				ss << (int) ((const uint8_t*)data)[i] << " ";
+			for (const uint8_t &it : m_data)
+				ss << (int) (it) << " ";
 
 			ss.unsetf(std::ios_base::hex);
 			ss<< "]";
 
 			return ss.str();
 		}
-		virtual ~GenericRData() =default;
 };
 
 
-class ARData: public GenericRData
+class ARData: public RData
 {
+	std::vector<uint8_t> m_data;
 	public:
-		ARData(const void* d, size_t s): GenericRData(d,s)
+		ARData(std::vector<uint8_t> &&data): m_data(data) 
 		{
-			if ( s != 4 ) throw std::invalid_argument("wrong rdata size for A record");
+			if ( this->m_data.size() != 4 ) throw std::invalid_argument("wrong rdata size for A record");
 		}
 		virtual operator std::string() override
 		{
 			std::stringstream ss;
-			for (size_t i=0; i < size; i++)
-				ss << (int) ((const uint8_t*)data)[i] <<( (i!=size-1) ? "." : "");
+			for (size_t i=0; i < this->m_data.size(); i++)
+				ss << (int) (this->m_data)[i] <<( (i!=this->m_data.size()-1) ? "." : "");
 			return ss.str();
 		}
 };
 
-class AAAARData: public GenericRData
+class AAAARData: public RData
 {
+	std::vector<uint8_t> m_data;
 	public:
-		AAAARData(const void* d, size_t s): GenericRData(d,s)
+		AAAARData(std::vector<uint8_t> &&data): m_data(data) 
 		{
-			if ( s != 16 ) throw std::invalid_argument("wrong rdata size for AAAA record");
+			if ( this->m_data.size() != 16 )  throw std::invalid_argument("wrong rdata size for AAAA record");
 		};
 		virtual operator std::string() override
 		{
@@ -195,16 +196,15 @@ class AAAARData: public GenericRData
 
 			ss.setf(std::ios_base::hex, std::ios_base::basefield);
 			// could be improved with replacing zeros with :: and remove leading zeros...
-			for (size_t i=0; i < size; i+=2)
-				ss << std::setw(2) << std::setfill('0') << (int) ((const uint8_t*)data)[i] 
-				   << std::setw(2) << std::setfill('0') << (int) ((const uint8_t*)data)[i+1]
-			   	   <<( (i!=size-2) ? ":" : "");
+			for (size_t i=0; i <  this->m_data.size(); i+=2)
+				ss << std::setw(2) << std::setfill('0') << (int) (this->m_data)[i] 
+				   << std::setw(2) << std::setfill('0') << (int) (this->m_data)[i+1]
+			   	   <<( (i!=this->m_data.size()  -2) ? ":" : "");
 
 			ss.unsetf(std::ios_base::hex);
 			return ss.str();
 		}
 };
-
 
 class CNAMERData: public RData
 {
@@ -220,26 +220,24 @@ class CNAMERData: public RData
 class MXRData: public RData
 {
 	std::string m_domain;
-	int16_t m_preference;
+	uint16_t m_preference;
 	public:
-		MXRData ( std::string domain, int16_t preference) :  m_domain(domain), m_preference(preference) {}
+		MXRData ( std::string domain, uint16_t preference) :  m_domain(domain), m_preference(preference) {}
 		virtual operator std::string() override
 		{
-			return std::to_string(m_preference) + m_domain;
+			return std::to_string(m_preference) + " " + m_domain;
 		}
 };
-
-class TXTRData: public GenericRData
+class TXTRData: public RData
 {
+	std::string m_str;
 	public:
-	TXTRData(const void* d, size_t s): GenericRData(d,s) {}
+	TXTRData(std::string&& str) : m_str(str) {};
 	virtual operator std::string() override
 	{
-		std::string ret( (const char*)data, size);
-		return ret;
+		return m_str;
 	}
 };
-
 
 class NSRData: public RData
 {
@@ -323,6 +321,7 @@ MessageParser::GetDomainName(bool couldBeCompressed)
 	{
 		if ( (lSize & 0xC0) == 0xC0)
 		{
+			if (!couldBeCompressed) throw std::invalid_argument("catch you"); // once kubernetes send srv with compression...
 			if (!compressed )
 				this->m_offset+=1; 
 			compressed = true;
@@ -367,10 +366,6 @@ MessageParser::GetResourceRecord()
 	resource_record_t ret;
 	ret.NAME = this->GetDomainName();
 
-	uint8_t *data = this->m_raw_data.data();	
-	size_t &offset = this->m_offset;
-
-	//TODO: MessageParser::GetUInt16 GetUInt32 etc and move reading from known RData at all
 	ret.TYPE  = this->Get<uint16_t>();
 	ret.CLASS = this->Get<uint16_t>();
 	ret.TTL   = this->Get<uint32_t>();
@@ -392,20 +387,30 @@ MessageParser::GetRData(uint16_t type)
 	size_t &offset = this->m_offset;
 
 	uint16_t RDLENGTH = this->Get<uint16_t>();
-	void *RDATA = data + offset;
+	if ( offset + RDLENGTH > this->m_raw_data.size() ) throw std::invalid_argument("out of bound");
 
+	void *RDATA = data + offset;
+	
 //https://www.cppstories.com/2018/02/factory-selfregister/
 // probably, not worth it. looks like clang fail to do this
 
 // TODO: enum
 	if (type == 1)
 	{
-		ret = new ARData(RDATA,RDLENGTH);
+		ret =	new ARData(
+			       	std::vector<uint8_t>(
+					this->m_raw_data.begin() + this->m_offset,
+				      	this->m_raw_data.begin() + this->m_offset + RDLENGTH )
+			);
 		offset += RDLENGTH;
 	}
 	else if (type == 28)
 	{
-		ret = new AAAARData(RDATA,RDLENGTH);
+		ret =	new AAAARData(
+			       	std::vector<uint8_t>(
+					this->m_raw_data.begin() + this->m_offset,
+				      	this->m_raw_data.begin() + this->m_offset + RDLENGTH )
+			);
 		offset += RDLENGTH;
 	}
 	else if (type == 5)
@@ -421,9 +426,9 @@ MessageParser::GetRData(uint16_t type)
 	}
 	else if (type == 16) 
 	{
-		ret = new TXTRData(RDATA,RDLENGTH);
+		ret = new TXTRData( std::string((const char*)RDATA,RDLENGTH) );
 		offset += RDLENGTH;
-	}
+	} 
 	else if (type == 2)
 	{
 		std::string cname = this->GetDomainName();       
@@ -431,7 +436,11 @@ MessageParser::GetRData(uint16_t type)
 	}
 	else
 	{
-		ret =	new GenericRData( RDATA, RDLENGTH);
+		ret =	new GenericRData(
+			       	std::vector<uint8_t>(
+					this->m_raw_data.begin() + this->m_offset,
+				      	this->m_raw_data.begin() + this->m_offset + RDLENGTH )
+			);
 		offset += RDLENGTH;
 	}
 	return std::unique_ptr<RData>(ret);
