@@ -243,11 +243,37 @@ class NSRData: public RData
 {
 	std::string m_domain;
 	public:
-		NSRData(const void* d, size_t s, std::string domain ): m_domain(domain) {};
+		NSRData(std::string domain ): m_domain(domain) {};
 		virtual operator std::string() override
 		{
 			return m_domain;
 		}
+};
+
+class SOARData: public RData
+{
+	std::string m_mname;
+	std::string m_rname;
+	uint32_t m_serial;
+	uint32_t m_refresh;
+	uint32_t m_retry;
+	uint32_t m_expire;
+	uint32_t m_minimum;
+	public:
+		SOARData(std::string mname, std::string rname, uint32_t serial, uint32_t refresh, uint32_t retry, uint32_t expire, uint32_t minimum  ): 
+			m_mname(mname), m_rname(rname), m_serial(serial), m_refresh(refresh), m_retry(retry), m_expire(expire), m_minimum(minimum)
+		{}
+		virtual operator std::string() override
+		{
+			return m_mname + " " + m_rname +
+			       	" " + std::to_string(m_serial) +
+			       	" " + std::to_string(m_refresh) +
+			       	" " + std::to_string(m_retry) + 
+				" " + std::to_string(m_expire) + 
+				" " + std::to_string(m_minimum);
+		}
+
+
 };
 
 
@@ -317,19 +343,26 @@ MessageParser::GetDomainName(bool couldBeCompressed)
 	size_t offset =  this->m_offset;
 	uint8_t *data = this->m_raw_data.data();
 
-	while ( (lSize = data[offset]) != 0 )
+	while ( (offset<this->m_raw_data.size()) && ( (lSize = data[offset]) != 0 ))
 	{
 		if ( (lSize & 0xC0) == 0xC0)
 		{
-			if (!couldBeCompressed) throw std::invalid_argument("catch you"); // once kubernetes send srv with compression...
+			if (!couldBeCompressed) throw std::invalid_argument("it shouldn't be compressed"); // once kubernetes send srv with compression...
 			if (!compressed )
 				this->m_offset+=1; 
 			compressed = true;
+			if (offset+1 >= this->m_raw_data.size()) 
+				throw std::invalid_argument("out of bound");
 			offset = ((data[offset] & 0x3f) << 8 ) | data[offset+1];
+			if (offset >= this->m_raw_data.size()) 
+				throw std::invalid_argument("out of bound");
 		}
 		else
 		{
 			offset++;
+			if ( offset + lSize > this->m_raw_data.size() ) throw std::invalid_argument("out of bound");
+			if (dOffset + lSize + 2 > MAX_NAME_LENGTH )  throw std::invalid_argument("too long domain name");
+
 			//TODO: check domain and raw_data size
 			std::memcpy(domain+dOffset, data+offset, lSize);
 			offset+=lSize;
@@ -417,12 +450,30 @@ MessageParser::GetRData(uint16_t type)
 	{
 		std::string cname = this->GetDomainName();       
 		ret = new CNAMERData(cname);
+		//should i check rdlength eq to offset from this record?
+	}
+	else if (type == 6)
+	{
+		std::string mname = this->GetDomainName();
+		std::string rname = this->GetDomainName();
+		uint32_t serial   = this->Get<uint32_t>();
+ 		uint32_t refresh    = this->Get<uint32_t>();
+	       	uint32_t retry   = this->Get<uint32_t>();
+ 		uint32_t expire   = this->Get<uint32_t>();
+ 		uint32_t minimum   = this->Get<uint32_t>();
+  
+		ret =	new SOARData(
+				mname, rname, serial, refresh, retry, expire, minimum  
+			);
+
+		//should i check rdlength eq to offset from this record?
 	}
 	else if (type == 15)
 	{
 		uint16_t PREFERENCE = this->Get<uint16_t>();
 		std::string EXCHANGE = this->GetDomainName();       
 		ret = new MXRData(EXCHANGE, PREFERENCE);
+		//should i check rdlength eq to offset from this record?
 	}
 	else if (type == 16) 
 	{
@@ -432,7 +483,8 @@ MessageParser::GetRData(uint16_t type)
 	else if (type == 2)
 	{
 		std::string cname = this->GetDomainName();       
-		ret = new NSRData(RDATA, RDLENGTH, cname);
+		ret = new NSRData(cname);
+		//should i check rdlength eq to offset from this record?
 	}
 	else
 	{
