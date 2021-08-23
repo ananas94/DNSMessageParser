@@ -101,25 +101,32 @@ struct dns_message_t {
 // could be linux/windows C-functions, but platform is unspecified in task,
 // so make own implementations
 
-// depends on endianness, so there should be some IFDEF/constexpr
-// but there is no compiler-agnostic way to detect byte order
-// so stuck wiht hackerrank's linux on x86  >_<
 uint16_t
 ntoh(uint16_t net)
 {
+// macro is not standard. constexpr(std::endian) is c++20 feature
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
     uint16_t ret = (net & 0xff) << 8 | (net & 0xff00) >> 8;
     return ret;
+#else
+    return net
+#endif
 }
 uint32_t
 ntoh(uint32_t net)
 {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
     uint32_t ret = (net & 0xff000000) >> 24 | (net & 0xff0000) >> 8 | (net & 0xff00) << 8 | (net & 0xff) << 24;
     return ret;
+#else
+    return net;
+#endif
 }
 
 class MessageParser {
 public:
     MessageParser(std::vector<uint8_t>&& message);
+
     dns_message_t GetDnsMessage();
     header_t GetHeader();
     question_t GetQuestion();
@@ -186,7 +193,6 @@ public:
     // not a problem for one time parser
     static std::unordered_map<std::string, RDataBuilder>& GetBuilders()
     {
-        // static class member wouldn't work due some  static initialization order fiasco with clang
         static std::unordered_map<std::string, RDataBuilder> builders;
         return builders;
     }
@@ -373,7 +379,13 @@ public:
 
     virtual operator std::string() override
     {
-        return m_mname + " " + m_rname + " " + std::to_string(m_serial) + " " + std::to_string(m_refresh) + " " + std::to_string(m_retry) + " " + std::to_string(m_expire) + " " + std::to_string(m_minimum);
+        return m_mname +
+               " " + m_rname +
+               " " + std::to_string(m_serial) +
+               " " + std::to_string(m_refresh) +
+               " " + std::to_string(m_retry) +
+               " " + std::to_string(m_expire) +
+               " " + std::to_string(m_minimum);
     }
 };
 
@@ -474,7 +486,7 @@ MessageParser::GetDomainName(bool couldBeCompressed)
     while ((offset < m_raw_data.size()) && ((lSize = data[offset]) != 0)) {
         if ((lSize & 0xC0) == 0xC0) {
             if (!couldBeCompressed)
-                throw std::invalid_argument("it shouldn't be compressed"); // once kubernetes send srv with target compression... rfc-2782
+                throw std::invalid_argument("it shouldn't be compressed"); // rfc-2782...
             if (!compressed)
                 m_offset += 1;
             compressed = true;
@@ -626,9 +638,9 @@ std::ostream& operator<<(std::ostream& os, header_t h)
 
 std::ostream& operator<<(std::ostream& os, question_t q)
 {
-    /*
+/*
     ;; QUESTION SECTION:
-    ;; example.com.			IN	A
+    ;; example.com.            IN    A
 */
     std::string cl;
     std::string type;
@@ -657,9 +669,9 @@ std::ostream& operator<<(std::ostream& os, const std::unique_ptr<RData>& d)
 
 std::ostream& operator<<(std::ostream& os, const resource_record_t& r)
 {
-    /*
+/*
 ;; ANSWER SECTION:
-example.com.		76391	IN	A	93.184.216.34
+example.com.        76391    IN    A    93.184.216.34
 */
 
     std::string cl;
