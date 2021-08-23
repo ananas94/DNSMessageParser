@@ -787,7 +787,7 @@ int main()
         dns_message_t dm = mp.GetDnsMessage();
         std::cout << dm << std::endl;
     } catch (std::invalid_argument& e) {
-        std::cout << e.what();
+        std::cout << "could not parse input message" << e.what();
         throw;
     }
 
