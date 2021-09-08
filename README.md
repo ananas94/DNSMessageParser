@@ -1,5 +1,7 @@
 # DNSMessageParser
 
+[![C/C++ CI](https://github.com/ananas94/DNSMessageParser/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/ananas94/DNSMessageParser/actions/workflows/c-cpp.yml)
+
 it's a project where I do fun with github actions.
 
 _____
