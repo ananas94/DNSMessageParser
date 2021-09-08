@@ -447,7 +447,6 @@ MessageParser::GetHeader()
         std::string errMsg("could not parse dns header");
         throw std::invalid_argument(errMsg);
     }
-    uint8_t* data = m_raw_data.data();
 
     ret.ID = Get<uint16_t>();
 
@@ -565,9 +564,6 @@ std::unique_ptr<RData>
 MessageParser::GetRData(uint16_t type)
 {
     RData* ret;
-
-    uint8_t* data = m_raw_data.data();
-    size_t& offset = m_offset;
 
     uint16_t RDLENGTH = Get<uint16_t>();
 
