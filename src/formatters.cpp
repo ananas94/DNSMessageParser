@@ -109,4 +109,3 @@ std::ostream &operator<<(std::ostream &os, const dns_message_t &d) {
   }
   return os;
 }
-

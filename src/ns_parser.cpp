@@ -3,11 +3,11 @@
 #include <map>
 #include <vector>
 
+#include "MessageParser.h"
 #include "RData.h"
 #include "RDataFactory.h"
 #include "dns_constants.h"
 #include "dns_structures.h"
-#include "MessageParser.h"
 #include "formatters.h"
 
 uint8_t parse_raw(const char *buf) {
@@ -23,7 +23,6 @@ uint8_t parse_raw(const char *buf) {
 }
 
 std::vector<uint8_t> parse_input_string(std::string str) {
-
   size_t strSize = str.size();
   if (strSize % 4 != 2 || str[0] != '"' || str[strSize - 1] != '"') {
     std::string errMsg;

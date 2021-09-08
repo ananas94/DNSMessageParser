@@ -1,7 +1,7 @@
-#include <cstring>
 #include "MessageParser.h"
-#include "dns_constants.h"
 #include "RDataFactory.h"
+#include "dns_constants.h"
+#include <cstring>
 
 // could be linux/windows C-functions, but platform is unspecified in task,
 // so make own implementations
@@ -186,4 +186,3 @@ dns_message_t MessageParser::GetDnsMessage() {
   }
   return ret;
 }
-
