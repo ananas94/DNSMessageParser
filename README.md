@@ -12,3 +12,6 @@ expect to receive "Escaped string  of dns message" from Wireshark
 ![howto: generate input for stdin](wireshark_howto_input.png)
 
 print it in (almost) human readable format to stdout
+
+
+![external img](https://hsto.org/getpro/habr/upload_files/c63/5e6/39e/c635e639e0b59d78753c3b6cdbc54be5.jpg)
