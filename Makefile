@@ -2,6 +2,7 @@ OUTPUT="dnsrrparser"
 
 .PHONY: all
 all: $(OUTPUT) 
+	git status || echo "well.. not git"
 
 CC=gcc
 CXX=g++
