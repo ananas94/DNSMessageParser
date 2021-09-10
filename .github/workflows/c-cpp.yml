@@ -17,15 +17,13 @@ jobs:
     - uses: actions/checkout@v2
     - name: make
       run: make all
-      
     - name: upload elf
       uses: actions/upload-artifact@v2
       with:
         name: dnsrrparser
         path: dnsrrparser
-    - uses: actions/download-artifact@v2
-    
     - name: download elf
+      uses: actions/download-artifact@v2
       with:
         name: dnsparser
         path: ~/download/path
