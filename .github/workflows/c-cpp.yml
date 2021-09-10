@@ -25,7 +25,7 @@ jobs:
     - name: download elf
       uses: actions/download-artifact@v2
       with:
-        name: dnsparser
+        name: dnsrrparser
         path: ~/download/path
     - name: Display structure of downloaded files
       run: ls -R
