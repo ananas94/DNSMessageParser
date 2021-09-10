@@ -28,6 +28,6 @@ jobs:
         name: dnsrrparser
         path: ~/download/path
     - name: Display structure of downloaded files
-      run: ls -R
+      run: bash -c "ls -R ~/download/path; pwd; cd ~/downlad; pwd"
       working-directory: .
       
