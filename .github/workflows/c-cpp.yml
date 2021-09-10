@@ -19,5 +19,5 @@ jobs:
         name: dnsrrparser
         path: dnsrrparser
     - name: test_commit
-      run: bash -c "if [ ! -f flag ];then touch flag; git config user.email 'no@email.com'; git config user.name 'pipeline';  git add flag; git commit -m \"add flag\"; else echo \"Hi\"; fi"
+      run: bash -c "if [ ! -f flag ];then touch flag; git config user.email 'no@email.com'; git config user.name 'pipeline';  git add flag; git commit -m \"add flag\"; git push; else echo \"Hi\"; fi"
 
