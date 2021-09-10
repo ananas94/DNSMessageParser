@@ -3,7 +3,11 @@ name: C/C++ CI
 on:
   push:
     branches: [ master ]
-
+    paths:
+      - '**.cpp'
+      - '**.h'
+      - 'Makefile
+      - '.github/**'
 jobs:
   build:
 
@@ -18,6 +22,3 @@ jobs:
       with:
         name: dnsrrparser
         path: dnsrrparser
-    - name: test_commit
-      run: bash -c "if [ ! -f flag ];then touch flag; git config user.email 'den.ananas94@gmail.com'; git config user.name 'ananas94';  git add flag; git commit -m \"add flag\"; git push; else echo \"Hi\"; fi"
-
