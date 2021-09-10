@@ -17,8 +17,16 @@ jobs:
     - uses: actions/checkout@v2
     - name: make
       run: make all
-    - name: bin_file    
+    - name: upload elf
       uses: actions/upload-artifact@v2
       with:
         name: dnsrrparser
         path: dnsrrparser
+    - name: download elf
+      with:
+        name: dnsparser
+        path: ~/download/path
+    - name: Display structure of downloaded files
+      run: ls -R
+      working-directory: .
+      
