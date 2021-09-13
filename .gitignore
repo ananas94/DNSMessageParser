@@ -1,5 +1,6 @@
 build/
 dnsrrparser
+dnsrrparser_test
 gtest
 libdnsrrparser.a
 
