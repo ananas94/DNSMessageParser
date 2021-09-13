@@ -12,12 +12,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+    - uses: actions/checkout@v2
     - uses: actions/cache@v2
       id: cache-gtest
       with:
-        path: ./gtest
-        key: ${{ runner.os }}-gtest
-    - uses: actions/checkout@v2
+        path: ${GITHUB_WORKSPACE}/gtest
+        key: ${{ runner.os }}-gtest-2
     - name: build-gtest
       if: steps.cache-gtest.outputs.cache-hit != 'true'
       run: sudo apt-get install libgtest-dev && cd /usr/src/gtest && sudo cmake CMakeLists.txt && sudo make && mkdir ${GITHUB_WORKSPACE}/gtest && cp -r include lib  ${GITHUB_WORKSPACE}/gtest
