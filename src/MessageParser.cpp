@@ -27,16 +27,6 @@ uint32_t ntoh(uint32_t net) {
 MessageParser::MessageParser(std::vector<uint8_t> &&message)
     : m_offset(0), m_raw_data(message) {}
 
-template <typename T> T MessageParser::Get() {
-  T ret;
-  if (m_offset + sizeof(ret) > m_raw_data.size())
-    throw std::invalid_argument("out of bound");
-  std::memcpy(&ret, m_raw_data.data() + m_offset, sizeof(ret));
-  m_offset += sizeof(ret);
-  ret = ntoh(ret);
-  return ret;
-}
-
 header_t MessageParser::GetHeader() {
   header_t ret;
   if (m_raw_data.size() < sizeof(uint16_t) * 6) {
