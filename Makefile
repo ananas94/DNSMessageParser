@@ -1,12 +1,11 @@
-OUTPUT="dnsrrparser"
+EXECUTABLE_OUT="dnsrrparser"
+LIBRARY_OUT="libdnsrrparser.a"
 
 .PHONY: all
-all: $(OUTPUT) 
-	git status || echo "well.. not git"
+all: $(EXECUTABLE_OUT)  $(LIBRARY_OUT)
 
 CC=gcc
 CXX=g++
-
 
 ifeq ($(DEBUG),true)
 	CFLAGS += -fsanitize=address 
@@ -16,11 +15,14 @@ endif
 
 BUILD_FOLDER:=build
 
+
 INCLUDE_FOLDERS=-I./include
 SOURCES_DIR=./src
 OBJ_DIR=$(BUILD_FOLDER)/obj
 DEP_DIR=$(BUILD_FOLDER)/dep
 
+MAIN=ns_parser.cpp
+MAIN_OBJ=$(OBJ_DIR)/$(MAIN:.cpp=.o)
 C_SOURCES=$(wildcard $(SOURCES_DIR)/*.c)
 CXX_SOURCES=$(wildcard $(SOURCES_DIR)/*.cpp)
 CFLAGS=-g -Wall
@@ -57,9 +59,14 @@ $(OBJ_DIR)/%.o : $(SOURCES_DIR)/%.c | $(OBJ_DIR)
 $(OBJ_DIR)/%.o : $(SOURCES_DIR)/%.cpp | $(OBJ_DIR)
 	$(CXX) $(CFLAGS) $(INCLUDE_FOLDERS) -c $< -o $@
 
-$(OUTPUT): $(OBJ)
-	$(CXX) $(CFLAGS) $(OBJ) $(LIBS) -o $(OUTPUT)
+$(EXECUTABLE_OUT): $(LIBRARY_OUT) $(OBJ)
+	$(CXX) $(CFLAGS) $(MAIN_OBJ) $(LIBRARY_OUT) $(LIBS) -o $(EXECUTABLE_OUT)
+
+$(LIBRARY_OUT): $(filter-out $(MAIN_OBJ),$(OBJ))
+	ar rvs $(LIBRARY_OUT) $^
+
 
 clean:
-	$(RM) $(OUTPUT)
+	$(RM) $(EXECUTABLE_OUT)
+	$(RM) $(LIBRARY_OUT)
 	$(RM) $(BUILD_FOLDER)
