@@ -3,7 +3,11 @@ name: C/C++ CI
 on:
   push:
     branches: [ master ]
-
+    paths:
+      - '**.cpp'
+      - '**.h'
+      - 'Makefile'
+      - '.github/**'
 jobs:
   build:
 
@@ -13,11 +17,17 @@ jobs:
     - uses: actions/checkout@v2
     - name: make
       run: make all
-    - name: bin_file    
+    - name: upload elf
       uses: actions/upload-artifact@v2
       with:
         name: dnsrrparser
         path: dnsrrparser
-    - name: test_commit
-      run: bash -c "if [ ! -f flag ];then touch flag; git config user.email 'den.ananas94@gmail.com'; git config user.name 'ananas94';  git add flag; git commit -m \"add flag\"; git push; else echo \"Hi\"; fi"
-
+    - name: download elf
+      uses: actions/download-artifact@v2
+      with:
+        name: dnsrrparser
+        path: ~/download/path
+    - name: Display structure of downloaded files
+      run: bash -c "ls -R ~/download/path; pwd; cd ~/download/path; pwd; ls"
+      working-directory: .
+      
