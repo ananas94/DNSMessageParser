@@ -21,7 +21,6 @@ jobs:
     - name: build-gtest
       if: steps.cache-gtest.outputs.cache-hit != 'true'
       run: sudo apt-get install libgtest-dev && cd /usr/src/gtest && sudo cmake CMakeLists.txt && sudo make && mkdir ${GITHUB_WORKSPACE}/gtest && cp -r include lib  ${GITHUB_WORKSPACE}/gtest
-      
     - name: make
       run: make all && ls
     - name: tests
