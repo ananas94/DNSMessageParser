@@ -24,6 +24,8 @@ jobs:
       
     - name: make
       run: make all && ls
+    - name: tests
+      run: make tests DEBUG=true BUILD_FOLDER=tmp && ./dnsrrparser_test
     - name: upload elf
       uses: actions/upload-artifact@v2
       with:
