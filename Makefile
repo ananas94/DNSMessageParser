@@ -1,20 +1,25 @@
-EXECUTABLE_OUT="dnsrrparser"
-LIBRARY_OUT="libdnsrrparser.a"
-TESTS_OUT="dnsrrparser_test"
+EXECUTABLE="dnsrrparser"
+LIBRARY="libdnsrrparser.a"
+TESTS="dnsrrparser_test"
+
+ifeq ($(DEBUG),true)
+	CFLAGS += -fsanitize=address 
+	SUFFIX = _dbg
+else
+	CFLAGS += -O2
+endif
+
+BUILD_FOLDER:=build${SUFFIX}/
+
+EXECUTABLE_OUT="dnsrrparser${SUFFIX}"
+LIBRARY_OUT="${BUILD_FOLDER}libdnsrrparser${SUFFIX}.a"
+TESTS_OUT="dnsrrparser_test${SUFFIX}"
 
 .PHONY: all
 all: $(EXECUTABLE_OUT)  $(LIBRARY_OUT)
 
 CC=gcc
 CXX=g++
-
-ifeq ($(DEBUG),true)
-	CFLAGS += -fsanitize=address 
-else
-	CFLAGS += -O2
-endif
-
-BUILD_FOLDER:=build
 
 
 INCLUDE_FOLDERS=-I./include
@@ -81,6 +86,9 @@ $(TESTS_OUT): $(LIBRARY_OUT) $(TESTS_OBJ)
 
 
 .PHONY: tests
+library: ${LIBRARY_OUT}
+
+.PHONY: tests
 tests: $(TESTS_OUT)
 
 .PHONY: clean
@@ -89,3 +97,4 @@ clean:
 	$(RM) $(LIBRARY_OUT)
 	$(RM) $(TESTS_OUT)
 	$(RM) $(BUILD_FOLDER)
+

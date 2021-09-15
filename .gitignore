@@ -1,6 +1,11 @@
 build/
+build_dbg/
+gtest/
+
 dnsrrparser
 dnsrrparser_test
-gtest
 libdnsrrparser.a
 
+dnsrrparser_dbg
+dnsrrparser_test_dbg
+libdnsrrparser_dbg.a
