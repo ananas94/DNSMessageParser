@@ -98,6 +98,10 @@ std::string MessageParser::GetDomainName(bool couldBeCompressed) {
         m_offset = offset;
     }
   }
+  if ( offset == m_raw_data.size() && lSize != 0 )
+  {
+        throw std::invalid_argument("looks like message cut");
+  }
   m_offset++;
   return domain;
 }
