@@ -5,7 +5,8 @@
 
 uint8_t parse_raw(const char *buf) {
   unsigned int uintVal;
-  if (sscanf(buf, "\\x%2x", &uintVal) != 1) {
+  char c;
+  if (sscanf(buf, "\\x%2x%c", &uintVal, &c) != 2 || ( c != '\\' && c != '"') ) {
     std::string errMsg;
     errMsg += "\"";
     errMsg += buf;

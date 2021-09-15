@@ -38,7 +38,8 @@ const char* exceptionTestCases[] =
 {
 	"\"\\x6\"",  // 2 hex digits
 	"\x6d",      // "" around
-	"12",        // wrf?
+	"12",        // wtf?
+ 	"\"\\x6p\"",
 };
 
 
